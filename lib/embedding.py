@@ -113,7 +113,7 @@ def api_embedding_build_stream(users: list, api_key: str = None, token: str = No
         jql = (f'assignee in ({user_jql}) AND status = "완료"'
                f' AND issuetype = "{issuetype}" ORDER BY updated DESC')
         params = urlencode({
-            "jql": jql, "maxResults": 200,
+            "jql": jql, "maxResults": 100,
             "fields": "summary,description,issuetype,updated",
         })
         try:
@@ -125,6 +125,16 @@ def api_embedding_build_stream(users: list, api_key: str = None, token: str = No
         except Exception as e:
             yield {"ok": False, "error": f"{issuetype} 조회 실패: {e}"}
             return
+
+    # 최대 100건으로 제한
+    if len(all_issues) > 100:
+        all_issues = all_issues[:100]
+        # jira_counts 조정 (정확한 통계를 위해)
+        recount = {}
+        for issue in all_issues:
+            it = (issue.get("fields", {}) or {}).get("issuetype", {}).get("name", "기타")
+            recount[it] = recount.get(it, 0) + 1
+        jira_counts = recount
 
     total_to_process = len(all_issues)
     yield {"step": "start", "total": total_to_process, "msg": f"총 {total_to_process}건의 이슈 처리를 시작합니다."}

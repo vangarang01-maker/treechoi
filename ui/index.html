@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sbe-jira-mcp</title>
+<link rel="stylesheet" href="/style.css">
+<script>
+const FIELDS = __FIELDS_JSON__;
+const SHORTCUTS = __SHORTCUTS_JSON__;
+</script>
+</head>
+<body>
+<div class="app">
+
+  <!-- 사이드바 -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-name">sbe-jira-mcp</div>
+      <div class="proj-badge" id="proj-badge">...</div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="nav-section-label">설정</div>
+      <button class="nav-item" data-page="settings" onclick="switchPage('settings', this)">⚙ 환경설정</button>
+      <div class="nav-section-label">기능</div>
+      <button class="nav-item" data-page="gemini" onclick="switchPage('gemini', this)">🤖 Gemini</button>
+      <button class="nav-item" data-page="chat" onclick="switchPage('chat', this)">💬 Jira 테스트</button>
+      <button class="nav-item" data-page="similar" onclick="switchPage('similar', this)">🔍 유사 이슈 검색</button>
+    </div>
+  </nav>
+
+  <!-- 컨텐츠 영역 -->
+  <main class="content">
+
+    <!-- 환경설정 페이지 -->
+    <div id="page-settings" class="page settings-page">
+      <div class="page-header">
+        <h2>환경설정</h2>
+        <p>API 키와 접속 정보를 관리합니다.</p>
+      </div>
+
+      <div class="settings-body">
+        <div class="card">
+          <div class="card-title">🔑 Gemini</div>
+          <div id="gemini-fields-inline"></div>
+          <div class="check-row">
+            <div class="tooltip-wrap">
+              <span class="help-icon">?</span>
+              <div class="tooltip-box">
+                <b>상태 확인 판단 기준</b><br>
+                countTokens API로 ping 전송<br>
+                🟢 정상 — API 키 유효, 모델 존재<br>
+                🟡 할당량 초과 (429) — quota 소진<br>
+                🔴 모델 없음 (404) — 모델명 오류<br>
+                🔴 API 키 오류 (400/401/403)<br>
+                🔴 오류 — 네트워크 오류 등
+              </div>
+            </div>
+            <button type="button" class="btn-check" id="gemini-check-btn" onclick="checkGemini()">⚡ 상태 확인</button>
+            <div class="gstatus" id="gstatus" style="display:none">
+              <span class="gstatus-dot" id="gstatus-dot"></span>
+              <span id="gstatus-text"></span>
+              <span class="gstatus-meta" id="gstatus-meta"></span>
+            </div>
+          </div>
+          <div class="card-actions">
+            <button type="button" class="btn btn-primary" onclick="saveGeminiSettings()">💾 저장</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🔗 Jira</div>
+          <div id="jira-fields-inline"></div>
+          <div class="card-actions">
+            <button type="button" class="btn btn-primary" onclick="saveJiraSettings()">💾 저장</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gemini 채팅 페이지 -->
+    <div id="page-gemini" class="page">
+      <div class="chat-panel">
+        <div class="gemini-header">
+          <span id="gemini-model-badge" class="model-badge">gemini</span>
+          <button class="btn-check" onclick="clearGeminiChat()">🗑 대화 초기화</button>
+        </div>
+        <div class="chat-history" id="gemini-history">
+          <div class="empty-hint" id="gemini-empty-hint">
+            <div class="big">🤖</div>
+            <div>Gemini에게 무엇이든 물어보세요</div>
+          </div>
+        </div>
+        <div class="chat-input-area">
+          <textarea
+            id="gemini-input"
+            class="chat-input gemini-textarea"
+            placeholder="메시지를 입력하세요… (Enter로 전송, Shift+Enter로 줄바꿈)"
+            autocomplete="off"
+            rows="1"
+          ></textarea>
+          <button class="send-btn" id="gemini-send-btn" onclick="sendGemini()">전송</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Jira 테스트 페이지 -->
+    <div id="page-chat" class="page">
+      <div class="chat-panel">
+        <div class="chips" id="chip-area"></div>
+        <div class="chat-history" id="chat-history">
+          <div class="empty-hint" id="empty-hint">
+            <div class="big">🔍</div>
+            <div>이슈 키(SCM3-1234), 단축어, JQL을 입력해보세요</div>
+          </div>
+        </div>
+        <div class="chat-input-area">
+          <input
+            id="chat-input"
+            class="chat-input"
+            type="text"
+            placeholder="이슈 키 또는 JQL 입력… (Enter로 전송)"
+            autocomplete="off"
+          >
+          <button class="send-btn" id="send-btn" onclick="sendChat()">전송</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 유사 이슈 페이지 -->
+    <div id="page-similar" class="page">
+      <div class="similar-panel">
+        <div class="collapsible-header" onclick="toggleSimilarSettings()">
+          <span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;">검색 설정</span>
+          <div class="collapsible-toggle">
+            <span>⚙ 대상 사용자</span>
+            <span id="similar-settings-arrow" class="toggle-arrow">▶</span>
+          </div>
+        </div>
+        <div class="collapsible-body" id="similar-settings-body">
+          <div class="collapsible-inner">
+            <div class="user-tag-area">
+              <div class="user-tag-label">검색 대상 사용자 (나 포함 최대 3명)</div>
+              <div class="user-tags" id="user-tags"></div>
+              <div class="user-add-row">
+                <input id="user-add-input" class="user-add-input" type="text" placeholder="사번 입력 후 Enter" autocomplete="off">
+                <button class="btn-check" onclick="addUser()">+ 추가</button>
+              </div>
+            </div>
+            <div class="cache-status" id="cache-status">캐시 정보 로딩 중...</div>
+            <div class="collapsible-actions">
+              <button type="button" class="btn btn-secondary" id="build-btn" onclick="buildCache()">🔄 캐시 구축 / 갱신</button>
+            </div>
+          </div>
+        </div>
+        <div class="similar-search-row">
+          <button class="btn btn-primary" id="similar-search-btn" onclick="searchSimilar()">🔍 유사 이슈 검색</button>
+        </div>
+        <div class="similar-results" id="similar-results">
+          <div class="empty-hint" id="similar-empty-hint">
+            <div class="big">🔍</div>
+            <div>캐시 구축 후 검색하면 미해결 이슈별 유사 완료 이슈를 보여줍니다</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+<div id="toast"></div>
+<script src="/script.js"></script>
+</body>
+</html>

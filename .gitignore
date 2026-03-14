@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Jira 이슈 캐시 (개인 데이터)
+data/embedding_cache.json
+data/ai_verify_cache.json
+
+# 로컬 환경설정
+.env

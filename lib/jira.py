@@ -17,7 +17,7 @@ SHORTCUTS = {
 }
 
 
-def jira_get(token: str, url: str) -> dict:
+def _jira_request(token: str, url: str, method: str = "GET", data: dict = None) -> dict:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -25,9 +25,58 @@ def jira_get(token: str, url: str) -> dict:
         "Authorization": f"Bearer {token}",
         "Accept": "application/json",
     }
-    req = urllib.request.Request(url, headers=headers)
+    payload = None
+    if data:
+        payload = json.dumps(data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    
+    req = urllib.request.Request(url, data=payload, headers=headers, method=method)
     with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        content = resp.read().decode("utf-8")
+        return json.loads(content) if content else {"ok": True}
+
+
+def jira_get(token: str, url: str) -> dict:
+    return _jira_request(token, url, "GET")
+
+
+def jira_update_issue(token: str, key: str, fields: dict = None, transition: str = None, comment: str = None) -> dict:
+    """이슈 업데이트: 필드 수정, 상태 변경, 댓글 추가"""
+    try:
+        results = {"key": key}
+        
+        # 1. 필드 수정 (담당자 등)
+        if fields:
+            url = f"{JIRA_BASE_URL}/rest/api/2/issue/{key}"
+            _jira_request(token, url, "PUT", {"fields": fields})
+            results["fields_updated"] = True
+
+        # 2. 상태 변경 (Transition)
+        if transition:
+            # 먼저 사용 가능한 transition ID 조회
+            trans_url = f"{JIRA_BASE_URL}/rest/api/2/issue/{key}/transitions"
+            trans_data = _jira_request(token, trans_url, "GET")
+            tid = ""
+            for t in trans_data.get("transitions", []):
+                if t.get("name") == transition or t.get("id") == transition:
+                    tid = t.get("id")
+                    break
+            
+            if tid:
+                _jira_request(token, trans_url, "POST", {"transition": {"id": tid}})
+                results["transition_updated"] = True
+            else:
+                results["transition_error"] = f"Transition '{transition}'을(를) 찾을 수 없습니다."
+
+        # 3. 댓글 추가
+        if comment:
+            comment_url = f"{JIRA_BASE_URL}/rest/api/2/issue/{key}/comment"
+            _jira_request(token, comment_url, "POST", {"body": comment})
+            results["comment_added"] = True
+
+        return {"ok": True, "results": results}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _extract_blossom_body(xml_str: str) -> str:

@@ -14,8 +14,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from lib.settings import api_read, api_write, ENV_FIELDS
-from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail
-from lib.gemini import api_gemini_chat, api_gemini_check, api_ai_verify
+from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail, jira_update_issue
+from lib.gemini import api_gemini_chat, api_gemini_check, api_ai_verify, api_gemini_process_agent
 from lib.embedding import api_embedding_cache_status, api_embedding_build, api_similar_issues
 
 PORT = 8765
@@ -112,11 +112,34 @@ class Handler(BaseHTTPRequestHandler):
                     cfg = api_read()
                     token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
                     if not token:
-                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}, 400)
+                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."} , 400)
                     else:
                         open_issue = jira_get_issue_detail(token, issue_key)
                         sim_issues = [jira_get_issue_detail(token, k) for k in similar_keys]
                         self._send_json(api_ai_verify(open_issue, sim_issues))
+            elif path == "/api/agent-query":
+                message = body.get("message", "").strip()
+                if not message:
+                    self._send_json({"ok": False, "error": "message가 비어있습니다."}, 400)
+                else:
+                    self._send_json(api_gemini_process_agent(message))
+            elif path == "/api/agent-execute":
+                action = body.get("action", {})
+                if not action or not action.get("issue_key"):
+                    self._send_json({"ok": False, "error": "action 파라미터가 유효하지 않습니다."}, 400)
+                else:
+                    cfg = api_read()
+                    token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
+                    if not token:
+                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."} , 400)
+                    else:
+                        self._send_json(jira_update_issue(
+                            token,
+                            action["issue_key"],
+                            fields=action.get("fields"),
+                            transition=action.get("transition"),
+                            comment=action.get("comment")
+                        ))
             else:
                 self.send_response(404)
                 self.end_headers()

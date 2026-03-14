@@ -144,6 +144,77 @@ def api_ai_verify(open_issue: dict, similar_issues: list) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def api_gemini_process_agent(message: str) -> dict:
+    """사용자 메시지를 분석하여 의도(검색, 채팅, 액션) 및 상세 파라미터 추출"""
+    cfg = api_read()
+    if not cfg.get("ok"):
+        return {"ok": False, "error": cfg.get("error")}
+    env = cfg.get("env", {})
+    api_key = env.get("GEMINI_API_KEY", "").strip()
+    model = env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+
+    prompt = f"""당신은 Jira 업무 보조 AI 에이전트입니다. 사용자의 자연어 입력을 분석하여 의도와 필요한 파라미터를 JSON 형식으로 응답하세요.
+
+의도 종류:
+1. SEARCH: Jira 이슈 검색 (JQL 생성 필요)
+2. ACTION: Jira 이슈 수정 (상태 변경, 담당자 변경, 댓글 추가 등)
+3. CHAT: 단순 대화 또는 도움말 요청
+
+필드 가이드 (JQL 생성 시):
+- 프로젝트: SCM3
+- 상태: "미해결", "Open", "진행중", "완료", "반려", "중단" 등
+- 이슈타입: "서비스요청관리", "변경관리" 등
+- 담당자: assignee = currentUser() 또는 특정 이름/사번(예: 223733)
+
+응답 JSON 형식:
+{{
+  "intent": "SEARCH" | "ACTION" | "CHAT",
+  "jql": "생성된 JQL (SEARCH인 경우)",
+  "action": {{
+    "issue_key": "이슈 키 (예: SCM3-1234)",
+    "fields": {{ "assignee": "사번" }},
+    "transition": "상태명 (예: 진행중)",
+    "comment": "추가할 댓글 내용"
+  }},
+  "reason": "분석 이유"
+}}
+
+사용자 입력: {message}
+
+JSON 응답:"""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    payload = json.dumps({
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 1024,
+            "response_mime_type": "application/json"
+        },
+    }).encode("utf-8")
+    ctx = ssl.create_default_context()
+
+    try:
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        
+        raw_reply = (data.get("candidates", [{}])[0]
+                     .get("content", {}).get("parts", [{}])[0].get("text", ""))
+        
+        result = json.loads(raw_reply)
+        return {"ok": True, "result": result}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def api_gemini_check() -> dict:
     """Gemini API 상태 확인 (countTokens로 ping)"""
     cfg = api_read()

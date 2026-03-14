@@ -42,6 +42,9 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
       <div class="settings-body">
         <div class="card">
           <div class="card-title">🔑 Gemini</div>
+          <div class="onboarding-links">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank">Gemini API 키 발급받기 ↗</a>
+          </div>
           <div id="gemini-fields-inline"></div>
           <div class="check-row">
             <div class="tooltip-wrap">
@@ -70,10 +73,10 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
 
         <div class="card">
           <div class="card-title">🔗 Jira</div>
-          <div id="jira-fields-inline"></div>
           <div class="onboarding-links">
             <a href="https://jira.sinc.co.kr/secure/ViewProfile.jspa" target="_blank">Jira 개인 액세스 토큰(PAT) 발급 안내 ↗</a>
           </div>
+          <div id="jira-fields-inline"></div>
           <div class="check-row">
             <button type="button" class="btn-check" id="jira-check-btn" onclick="checkJira()">⚡ 연결 확인</button>
             <div class="gstatus" id="jstatus" style="display:none">

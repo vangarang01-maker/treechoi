@@ -9,9 +9,9 @@ config_ui.py — sbe-jira-mcp 설정 관리 웹 UI
 
 import json
 import os
-import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 from lib.settings import api_read, api_write, ENV_FIELDS
 from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail, jira_update_issue, api_jira_check
@@ -71,8 +71,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/embedding-cache-status":
             self._send_json(api_embedding_cache_status())
         elif path == "/api/embedding-build-stream":
-            parsed = urllib.parse.urlparse(self.path)
-            qs = urllib.parse.parse_qs(parsed.query)
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
             users = qs.get("users", [])
             
             self.send_response(200)

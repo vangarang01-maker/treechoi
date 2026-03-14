@@ -162,6 +162,12 @@ body {
   opacity: 1;
   text-decoration: underline;
 }
+.guidance-note {
+  font-size: 10px;
+  color: var(--warn);
+  opacity: 0.8;
+  margin-top: 4px;
+}
 .card-actions .btn { flex: none; padding: 8px 24px; }
 
 /* ── Field ── */

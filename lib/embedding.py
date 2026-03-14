@@ -80,14 +80,16 @@ def api_embedding_cache_status() -> dict:
         return {"ok": False, "error": str(e)}
 
 
-def api_embedding_build(users: list) -> dict:
+def api_embedding_build(users: list, api_key: str = None, token: str = None) -> dict:
     """완료 이슈 임베딩 캐시 구축 (기존 캐시 재사용 — 이미 있는 이슈는 건너뜀)"""
-    cfg = api_read()
-    if not cfg.get("ok"):
-        return {"ok": False, "error": cfg.get("error")}
-    env = cfg.get("env", {})
-    token = env.get("JIRA_PAT_TOKEN", "")
-    api_key = env.get("GEMINI_API_KEY", "")
+    if not api_key or not token:
+        cfg = api_read()
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        token = token or env.get("JIRA_PAT_TOKEN", "")
+        api_key = api_key or env.get("GEMINI_API_KEY", "")
+
     if not token:
         return {"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}
     if not api_key:
@@ -156,14 +158,16 @@ def api_embedding_build(users: list) -> dict:
     return result
 
 
-def api_similar_issues(users: list) -> dict:
+def api_similar_issues(users: list, api_key: str = None, token: str = None) -> dict:
     """미해결 이슈별 유사 완료 이슈 Top 3"""
-    cfg = api_read()
-    if not cfg.get("ok"):
-        return {"ok": False, "error": cfg.get("error")}
-    env = cfg.get("env", {})
-    token = env.get("JIRA_PAT_TOKEN", "")
-    api_key = env.get("GEMINI_API_KEY", "")
+    if not api_key or not token:
+        cfg = api_read()
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        token = token or env.get("JIRA_PAT_TOKEN", "")
+        api_key = api_key or env.get("GEMINI_API_KEY", "")
+
     if not token:
         return {"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}
     if not api_key:

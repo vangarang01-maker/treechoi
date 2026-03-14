@@ -8,15 +8,15 @@ import urllib.request
 from .settings import api_read
 
 
-def api_gemini_chat(history: list, message: str) -> dict:
+def api_gemini_chat(history: list, message: str, api_key: str = None, model: str = None) -> dict:
     """Gemini와 실시간 채팅 — 대화 히스토리 유지"""
-    cfg = api_read()
-    if not cfg.get("ok"):
-        return {"ok": False, "error": cfg.get("error", "설정 로드 실패")}
-
-    env = cfg.get("env", {})
-    api_key = env.get("GEMINI_API_KEY", "").strip()
-    model = env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key or not model:
+        cfg = api_read()
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error", "설정 로드 실패")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
 
     if not api_key:
         return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
@@ -65,14 +65,15 @@ def api_gemini_chat(history: list, message: str) -> dict:
         return {"ok": False, "error": str(e)}
 
 
-def api_ai_verify(open_issue: dict, similar_issues: list) -> dict:
+def api_ai_verify(open_issue: dict, similar_issues: list, api_key: str = None, model: str = None) -> dict:
     """Gemini로 Top 3 완료 이슈 중 최적 1건 선택"""
-    cfg = api_read()
-    if not cfg.get("ok"):
-        return {"ok": False, "error": cfg.get("error")}
-    env = cfg.get("env", {})
-    api_key = env.get("GEMINI_API_KEY", "").strip()
-    model = env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key or not model:
+        cfg = api_read()
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
     if not api_key:
         return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
 
@@ -144,14 +145,15 @@ def api_ai_verify(open_issue: dict, similar_issues: list) -> dict:
         return {"ok": False, "error": str(e)}
 
 
-def api_gemini_process_agent(message: str) -> dict:
+def api_gemini_process_agent(message: str, api_key: str = None, model: str = None) -> dict:
     """사용자 메시지를 분석하여 의도(검색, 채팅, 액션) 및 상세 파라미터 추출"""
-    cfg = api_read()
-    if not cfg.get("ok"):
-        return {"ok": False, "error": cfg.get("error")}
-    env = cfg.get("env", {})
-    api_key = env.get("GEMINI_API_KEY", "").strip()
-    model = env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key or not model:
+        cfg = api_read()
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
     
     if not api_key:
         return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
@@ -215,15 +217,15 @@ JSON 응답:"""
         return {"ok": False, "error": str(e)}
 
 
-def api_gemini_check() -> dict:
+def api_gemini_check(api_key: str = None, model: str = None) -> dict:
     """Gemini API 상태 확인 (countTokens로 ping)"""
-    cfg = api_read()
-    if not cfg.get("ok"):
-        return {"ok": False, "status": "config_error", "message": cfg.get("error")}
-
-    env = cfg.get("env", {})
-    api_key = env.get("GEMINI_API_KEY", "").strip()
-    model = env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key or not model:
+        cfg = api_read()
+        if not cfg.get("ok"):
+            return {"ok": False, "status": "config_error", "message": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
 
     if not api_key:
         return {"ok": False, "status": "no_key", "message": "API 키가 설정되지 않았습니다."}

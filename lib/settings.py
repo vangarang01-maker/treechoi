@@ -1,9 +1,18 @@
-"""claude.json 설정 읽기/쓰기"""
+"""설정 읽기/쓰기 — 환경변수(.env) 우선, 없으면 claude.json 폴백"""
 import json
+import os
 from pathlib import Path
 
 CLAUDE_JSON = Path.home() / ".claude.json"
 MCP_NAME = "sbe-jira-mcp"
+
+# Docker 환경변수 키 목록
+_ENV_KEYS = ["GEMINI_API_KEY", "GEMINI_MODEL", "JIRA_PAT_TOKEN", "JIRA_USERNAME"]
+
+
+def _is_docker_env() -> bool:
+    """환경변수에 핵심 키가 있으면 Docker/env 모드로 판단"""
+    return any(os.environ.get(k) for k in _ENV_KEYS)
 
 ENV_FIELDS = [
     {"key": "JIRA_PAT_TOKEN", "label": "Jira PAT Token",    "sensitive": True,  "placeholder": "Personal Access Token"},
@@ -34,6 +43,11 @@ def _find_project_key(data: dict) -> str | None:
 
 
 def api_read() -> dict:
+    # ── Docker / 환경변수 모드 ─────────────────────────────
+    if _is_docker_env():
+        env = {k: os.environ.get(k, "") for k in _ENV_KEYS}
+        return {"ok": True, "env": env, "projectKey": "__env__"}
+    # ── 로컬 개발: claude.json 폴백 ───────────────────────
     try:
         data = _load()
         pk = _find_project_key(data)
@@ -46,6 +60,9 @@ def api_read() -> dict:
 
 
 def api_write(env_updates: dict) -> dict:
+    # Docker 환경에서는 .env 파일이 읽기 전용 — 저장 불가 안내
+    if _is_docker_env():
+        return {"ok": False, "error": "Docker 환경에서는 설정을 UI에서 변경할 수 없습니다. .env 파일을 직접 수정 후 컨테이너를 재시작하세요."}
     try:
         data = _load()
         pk = _find_project_key(data)

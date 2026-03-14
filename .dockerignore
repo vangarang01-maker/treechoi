@@ -1,0 +1,9 @@
+# Docker 빌드 시 제외할 파일/폴더
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+.env
+docs/
+*.md

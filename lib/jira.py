@@ -120,14 +120,14 @@ def jira_get_issue_detail(token: str, key: str) -> dict:
     }
 
 
-def api_chat(query: str) -> dict:
+def api_chat(query: str, token: str = None) -> dict:
     """이슈 키 또는 JQL로 Jira 검색"""
-    cfg = api_read()
-    if not cfg.get("ok"):
-        return {"error": cfg.get("error", "설정 로드 실패")}
-
-    env = cfg.get("env", {})
-    token = env.get("JIRA_PAT_TOKEN", "")
+    if not token:
+        cfg = api_read()
+        if not cfg.get("ok"):
+            return {"error": cfg.get("error", "설정 로드 실패")}
+        env = cfg.get("env", {})
+        token = env.get("JIRA_PAT_TOKEN", "")
     if not token:
         return {"error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}
 
@@ -172,3 +172,18 @@ def api_chat(query: str) -> dict:
         return {"error": f"HTTP {e.code}: {body[:300]}"}
     except Exception as e:
         return {"error": str(e)}
+
+
+def api_jira_check(token: str) -> dict:
+    """Jira 연결 상태 확인"""
+    url = f"{JIRA_BASE_URL}/rest/api/2/myself"
+    try:
+        data = jira_get(token, url)
+        return {
+            "ok": True,
+            "displayName": data.get("displayName"),
+            "name": data.get("name"),
+            "email": data.get("emailAddress")
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

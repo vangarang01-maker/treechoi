@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  sbe-jira-ui:
+    build: .
+    ports:
+      - "8765:8765"
+    env_file:
+      - .env
+    environment:
+      - IS_DOCKER=1
+    volumes:
+      # 임베딩 캐시를 호스트에 보관 (컨테이너 재시작해도 유지)
+      - ./data:/app/data
+    restart: unless-stopped

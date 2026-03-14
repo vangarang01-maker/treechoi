@@ -103,43 +103,74 @@ function renderFields() {
   if (geminiEl) geminiEl.innerHTML = FIELDS.filter(f => GEMINI_KEYS.includes(f.key)).map(buildField).join('');
 }
 
+// ── 환경변수 패키징 ──
+function getEnv() {
+  const env = {};
+  [...JIRA_KEYS, ...GEMINI_KEYS].forEach(k => {
+    env[k] = localStorage.getItem(k) || '';
+  });
+  return env;
+}
+
 async function loadConfig() {
   try {
     const res = await fetch('/api/config');
     const data = await res.json();
     if (data.error) {
       showToast('❌ ' + data.error, 'error');
-      return;
+      // 에러가 나더라도 localStorage 값은 로드 시도
     }
-    const env = data.env || {};
+    const serverEnv = data.env || {};
     const pk = data.projectKey || '';
     document.getElementById('proj-badge').textContent = pk.split(/[\\/]/).pop() || pk || '-';
+    
     FIELDS.forEach(f => {
       const inp = document.getElementById('inp-' + f.key);
       if (inp) {
+        // localStorage 우선, 없으면 서버 값
+        const val = localStorage.getItem(f.key) || serverEnv[f.key] || '';
         if (f.type === 'select') {
-          inp.value = env[f.key] || (f.options && f.options[0] ? f.options[0].value : '');
+          inp.value = val || (f.options && f.options[0] ? f.options[0].value : '');
         } else {
-          inp.value = env[f.key] || '';
+          inp.value = val;
         }
         updateDot(f.key);
       }
     });
-    const modelInp = document.getElementById('inp-GEMINI_MODEL');
     const badge = document.getElementById('gemini-model-badge');
     if (modelInp && badge) badge.textContent = modelInp.value || 'gemini';
+
+    // 히스토리 로드
+    const saved = localStorage.getItem('gemini_chat_history');
+    if (saved) {
+      geminiHistory = JSON.parse(saved);
+      if (geminiHistory.length > 0) {
+        const hint = document.getElementById('gemini-empty-hint');
+        if (hint) hint.remove();
+        geminiHistory.forEach(h => {
+          if (h.role === 'user') appendGeminiUser(h.text, false);
+          else appendGeminiBot(h.text, 0, '', false);
+        });
+      }
+    }
   } catch(e) {
     showToast('❌ 로드 실패: ' + e.message, 'error');
   }
 }
 
 // ── Gemini 설정 저장 ──
+// ── Gemini 설정 저장 ──
 async function saveGeminiSettings() {
   const env = {};
   GEMINI_KEYS.forEach(key => {
     const inp = document.getElementById('inp-' + key);
-    if (inp) env[key] = inp.value;
+    if (inp) {
+      env[key] = inp.value;
+      localStorage.setItem(key, inp.value); // 브라우저 저장
+    }
   });
+
+  // 서버 동기화 시도 (선택 사항)
   try {
     const res = await fetch('/api/config', {
       method: 'POST',
@@ -148,24 +179,29 @@ async function saveGeminiSettings() {
     });
     const data = await res.json();
     if (data.ok) {
-      showToast('✓ 저장 완료 — Claude Code 재시작 후 적용됩니다', 'success');
-      const modelInp = document.getElementById('inp-GEMINI_MODEL');
-      const badge = document.getElementById('gemini-model-badge');
-      if (modelInp && badge) badge.textContent = modelInp.value || 'gemini';
+      showToast('✓ 브라우저 및 서버 저장 완료', 'success');
     } else {
-      showToast('❌ ' + data.error, 'error');
+      // 서버 저장 실패해도 브라우저에는 저장됨
+      showToast('✓ 브라우저에 저장됨 (서버 저장 skip: ' + data.error + ')', 'info');
     }
+    const modelInp = document.getElementById('inp-GEMINI_MODEL');
+    const badge = document.getElementById('gemini-model-badge');
+    if (modelInp && badge) badge.textContent = modelInp.value || 'gemini';
   } catch(e) {
-    showToast('❌ 저장 실패: ' + e.message, 'error');
+    showToast('✓ 브라우저에 저장됨', 'info');
   }
 }
 
+// ── Jira 설정 저장 ──
 // ── Jira 설정 저장 ──
 async function saveJiraSettings() {
   const env = {};
   JIRA_KEYS.forEach(key => {
     const inp = document.getElementById('inp-' + key);
-    if (inp) env[key] = inp.value;
+    if (inp) {
+      env[key] = inp.value;
+      localStorage.setItem(key, inp.value); // 브라우저 저장
+    }
   });
   try {
     const res = await fetch('/api/config', {
@@ -175,12 +211,12 @@ async function saveJiraSettings() {
     });
     const data = await res.json();
     if (data.ok) {
-      showToast('✓ 저장 완료 — Claude Code 재시작 후 적용됩니다', 'success');
+      showToast('✓ 브라우저 및 서버 저장 완료', 'success');
     } else {
-      showToast('❌ ' + data.error, 'error');
+      showToast('✓ 브라우저에 저장됨', 'info');
     }
   } catch(e) {
-    showToast('❌ 저장 실패: ' + e.message, 'error');
+    showToast('✓ 브라우저에 저장됨', 'info');
   }
 }
 
@@ -209,7 +245,7 @@ async function sendChat() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({query: q}),
+      body: JSON.stringify({query: q, env: getEnv()}),
     });
     const data = await res.json();
     spinner.remove();
@@ -261,9 +297,13 @@ function appendSpinner() {
 }
 
 function appendError(msg) {
+  let guide = '';
+  if (msg.includes('401')) guide = '<br><small>Jira PAT Token이 만료되었거나 잘못되었습니다.</small>';
+  if (msg.includes('403')) guide = '<br><small>Jira 프로젝트/이슈에 대한 접근 권한이 없습니다.</small>';
+  
   const wrap = document.createElement('div');
   wrap.className = 'bubble-wrap bot';
-  wrap.innerHTML = `<div class="error-card">⚠ ${escHtml(msg)}</div>`;
+  wrap.innerHTML = `<div class="error-card">⚠ ${escHtml(msg)}${guide}</div>`;
   getHistory().appendChild(wrap);
   scrollBottom();
 }
@@ -373,7 +413,11 @@ async function checkGemini() {
   btn.textContent = '확인 중...';
 
   try {
-    const res = await fetch('/api/gemini-check');
+    const res = await fetch('/api/gemini-check', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({env: getEnv()}),
+    });
     const data = await res.json();
     showGeminiStatus(data);
   } catch(e) {
@@ -414,6 +458,48 @@ function showGeminiStatus(data) {
   }
 }
 
+// ── Jira 상태 확인 ──
+async function checkJira() {
+  const btn = document.getElementById('jira-check-btn');
+  btn.disabled = true;
+  btn.textContent = '확인 중...';
+
+  try {
+    const res = await fetch('/api/jira-check', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({env: getEnv()}),
+    });
+    const data = await res.json();
+    showJiraStatus(data);
+  } catch(e) {
+    showJiraStatus({ ok: false, error: e.message });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⚡ 연결 확인';
+  }
+}
+
+function showJiraStatus(data) {
+  const area = document.getElementById('jstatus');
+  const dot  = document.getElementById('jstatus-dot');
+  const text = document.getElementById('jstatus-text');
+  const meta = document.getElementById('jstatus-meta');
+
+  area.style.display = 'flex';
+  const now = new Date().toLocaleTimeString('ko-KR');
+
+  if (data.ok) {
+    dot.className  = 'gstatus-dot ok';
+    text.textContent = '정상';
+    meta.textContent = `${data.displayName} (${data.name}) · ${now}`;
+  } else {
+    dot.className  = 'gstatus-dot err';
+    text.textContent = '연결 실패';
+    meta.textContent = (data.error || '오류') + ' · ' + now;
+  }
+}
+
 // ── Gemini 채팅 ──
 let geminiHistory = [];
 
@@ -438,7 +524,7 @@ async function sendGemini() {
     const res = await fetch('/api/agent-query', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message: msg}),
+      body: JSON.stringify({message: msg, env: getEnv()}),
     });
     const data = await res.json();
     spinner.remove();
@@ -464,7 +550,7 @@ async function sendGemini() {
       const chatRes = await fetch('/api/gemini-chat', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({message: msg, history: geminiHistory}),
+        body: JSON.stringify({message: msg, history: geminiHistory, env: getEnv()}),
       });
       const chatData = await chatRes.json();
       chatSpinner.remove();
@@ -474,6 +560,7 @@ async function sendGemini() {
       } else {
         geminiHistory.push({role: 'user', text: msg});
         geminiHistory.push({role: 'model', text: chatData.reply});
+        localStorage.setItem('gemini_chat_history', JSON.stringify(geminiHistory));
         appendGeminiBot(chatData.reply, chatData.latency_ms, chatData.model);
       }
     }
@@ -525,7 +612,7 @@ async function executeAgentAction(uid, action) {
     const res = await fetch('/api/agent-execute', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({action}),
+      body: JSON.stringify({action, env: getEnv()}),
     });
     const data = await res.json();
     if (data.ok) {
@@ -547,6 +634,7 @@ async function executeAgentAction(uid, action) {
 
 function clearGeminiChat() {
   geminiHistory = [];
+  localStorage.removeItem('gemini_chat_history');
   const h = document.getElementById('gemini-history');
   h.innerHTML = `<div class="empty-hint" id="gemini-empty-hint">
     <div class="big">🤖</div>
@@ -573,12 +661,12 @@ function scrollGeminiBottom() {
   setTimeout(() => h.scrollTop = h.scrollHeight, 50);
 }
 
-function appendGeminiUser(text) {
+function appendGeminiUser(text, scroll = true) {
   const wrap = document.createElement('div');
   wrap.className = 'bubble-wrap user';
   wrap.innerHTML = `<div class="bubble-user">${escHtml(text).replace(/\n/g,'<br>')}</div>`;
   getGeminiHistory().appendChild(wrap);
-  scrollGeminiBottom();
+  if (scroll) scrollGeminiBottom();
 }
 
 function appendGeminiSpinner() {
@@ -593,14 +681,14 @@ function appendGeminiSpinner() {
   return wrap;
 }
 
-function appendGeminiBot(text, latency, model) {
+function appendGeminiBot(text, latency, model, scroll = true) {
   const wrap = document.createElement('div');
   wrap.className = 'bubble-wrap bot';
   const html = markdownToHtml(text);
   const meta = latency ? `<div class="gemini-meta">${latency}ms · ${model || ''}</div>` : '';
   wrap.innerHTML = `<div class="bubble-gemini">${html}${meta}</div>`;
   getGeminiHistory().appendChild(wrap);
-  scrollGeminiBottom();
+  if (scroll) scrollGeminiBottom();
 }
 
 function appendGeminiError(msg) {
@@ -704,7 +792,7 @@ async function buildCache() {
     const res = await fetch('/api/embedding-build', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({users: similarUsers}),
+      body: JSON.stringify({users: similarUsers, env: getEnv()}),
     });
     const data = await res.json();
     if (data.ok) {
@@ -738,7 +826,7 @@ async function searchSimilar() {
     const res = await fetch('/api/similar-issues', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({users: similarUsers}),
+      body: JSON.stringify({users: similarUsers, env: getEnv()}),
     });
     const data = await res.json();
     if (!data.ok) {
@@ -824,7 +912,11 @@ async function verifyIssue(issueKey, btn) {
     const res = await fetch('/api/ai-verify', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({issue_key: issueKey, similar_keys: similarKeys}),
+      body: JSON.stringify({
+        issue_key: issueKey, 
+        similar_keys: similarKeys,
+        env: getEnv()
+      }),
     });
     const data = await res.json();
     if (data.ok) {

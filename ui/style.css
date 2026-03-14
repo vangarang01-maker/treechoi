@@ -147,6 +147,21 @@ body {
   display: flex;
   justify-content: flex-end;
 }
+.onboarding-links {
+  margin-top: -10px;
+  margin-bottom: 15px;
+  font-size: 11px;
+}
+.onboarding-links a {
+  color: var(--accent);
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity .15s;
+}
+.onboarding-links a:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
 .card-actions .btn { flex: none; padding: 8px 24px; }
 
 /* ── Field ── */

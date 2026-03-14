@@ -71,6 +71,17 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
         <div class="card">
           <div class="card-title">🔗 Jira</div>
           <div id="jira-fields-inline"></div>
+          <div class="onboarding-links">
+            <a href="https://jira.sinc.co.kr/profile" target="_blank">Jira 개인 액세스 토큰(PAT) 발급 안내 ↗</a>
+          </div>
+          <div class="check-row">
+            <button type="button" class="btn-check" id="jira-check-btn" onclick="checkJira()">⚡ 연결 확인</button>
+            <div class="gstatus" id="jstatus" style="display:none">
+              <span class="gstatus-dot" id="jstatus-dot"></span>
+              <span id="jstatus-text"></span>
+              <span class="gstatus-meta" id="jstatus-meta"></span>
+            </div>
+          </div>
           <div class="card-actions">
             <button type="button" class="btn btn-primary" onclick="saveJiraSettings()">💾 저장</button>
           </div>

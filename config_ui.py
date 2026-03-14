@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from lib.settings import api_read, api_write, ENV_FIELDS
-from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail, jira_update_issue
+from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail, jira_update_issue, api_jira_check
 from lib.gemini import api_gemini_chat, api_gemini_check, api_ai_verify, api_gemini_process_agent
 from lib.embedding import api_embedding_cache_status, api_embedding_build, api_similar_issues
 
@@ -86,50 +86,95 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/config":
                 self._send_json(api_write(body.get("env", {})))
+            elif path == "/api/gemini-check":
+                env_in = body.get("env", {})
+                self._send_json(api_gemini_check(
+                    model=env_in.get("GEMINI_MODEL")
+                ))
+            elif path == "/api/jira-check":
+                env_in = body.get("env", {})
+                self._send_json(api_jira_check(
+                    token=env_in.get("JIRA_PAT_TOKEN")
+                ))
             elif path == "/api/chat":
                 query = body.get("query", "").strip()
+                env_in = body.get("env", {})
                 if not query:
                     self._send_json({"error": "query가 비어있습니다."}, 400)
                 else:
-                    self._send_json(api_chat(query))
+                    self._send_json(api_chat(query, token=env_in.get("JIRA_PAT_TOKEN")))
             elif path == "/api/gemini-chat":
                 message = body.get("message", "").strip()
                 history = body.get("history", [])
+                env_in = body.get("env", {})
                 if not message:
                     self._send_json({"error": "message가 비어있습니다."}, 400)
                 else:
-                    self._send_json(api_gemini_chat(history, message))
+                    self._send_json(api_gemini_chat(
+                        history, message,
+                        api_key=env_in.get("GEMINI_API_KEY"),
+                        model=env_in.get("GEMINI_MODEL")
+                    ))
             elif path == "/api/embedding-build":
-                self._send_json(api_embedding_build(body.get("users", [])))
+                users = body.get("users", [])
+                env_in = body.get("env", {})
+                self._send_json(api_embedding_build(
+                    users,
+                    api_key=env_in.get("GEMINI_API_KEY"),
+                    token=env_in.get("JIRA_PAT_TOKEN")
+                ))
             elif path == "/api/similar-issues":
-                self._send_json(api_similar_issues(body.get("users", [])))
+                users = body.get("users", [])
+                env_in = body.get("env", {})
+                self._send_json(api_similar_issues(
+                    users,
+                    api_key=env_in.get("GEMINI_API_KEY"),
+                    token=env_in.get("JIRA_PAT_TOKEN")
+                ))
             elif path == "/api/ai-verify":
                 issue_key = body.get("issue_key", "").strip()
                 similar_keys = body.get("similar_keys", [])
+                env_in = body.get("env", {})
                 if not issue_key or not similar_keys:
                     self._send_json({"ok": False, "error": "issue_key와 similar_keys가 필요합니다."}, 400)
                 else:
-                    cfg = api_read()
-                    token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
+                    token = env_in.get("JIRA_PAT_TOKEN")
+                    if not token:
+                        cfg = api_read()
+                        token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
+                    
                     if not token:
                         self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."} , 400)
                     else:
                         open_issue = jira_get_issue_detail(token, issue_key)
                         sim_issues = [jira_get_issue_detail(token, k) for k in similar_keys]
-                        self._send_json(api_ai_verify(open_issue, sim_issues))
+                        self._send_json(api_ai_verify(
+                            open_issue, sim_issues,
+                            api_key=env_in.get("GEMINI_API_KEY"),
+                            model=env_in.get("GEMINI_MODEL")
+                        ))
             elif path == "/api/agent-query":
                 message = body.get("message", "").strip()
+                env_in = body.get("env", {})
                 if not message:
                     self._send_json({"ok": False, "error": "message가 비어있습니다."}, 400)
                 else:
-                    self._send_json(api_gemini_process_agent(message))
+                    self._send_json(api_gemini_process_agent(
+                        message,
+                        api_key=env_in.get("GEMINI_API_KEY"),
+                        model=env_in.get("GEMINI_MODEL")
+                    ))
             elif path == "/api/agent-execute":
                 action = body.get("action", {})
+                env_in = body.get("env", {})
                 if not action or not action.get("issue_key"):
                     self._send_json({"ok": False, "error": "action 파라미터가 유효하지 않습니다."}, 400)
                 else:
-                    cfg = api_read()
-                    token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
+                    token = env_in.get("JIRA_PAT_TOKEN")
+                    if not token:
+                        cfg = api_read()
+                        token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
+                    
                     if not token:
                         self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."} , 400)
                     else:
@@ -155,12 +200,22 @@ class Handler(BaseHTTPRequestHandler):
 # ── 진입점 ────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    url = f"http://localhost:{PORT}"
-    server = HTTPServer(("localhost", PORT), Handler)
-    print(f"[sbe-jira-mcp] 설정 UI 시작")
-    print(f"  {url}")
+    import os
+    is_docker = os.environ.get("IS_DOCKER", "").lower() in ("1", "true", "yes")
+    host = "0.0.0.0" if is_docker else "localhost"
+
+    server = HTTPServer((host, PORT), Handler)
+    local_url = f"http://localhost:{PORT}"
+
+    print(f"[sbe-jira-ui] 서버 시작")
+    if is_docker:
+        print(f"  내 PC 접속:  {local_url}")
+        print(f"  팀원 접속:   http://<내 PC IP>:{PORT}")
+    else:
+        print(f"  {local_url}")
+        webbrowser.open(local_url)
     print(f"  종료: Ctrl+C\n")
-    webbrowser.open(url)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -168,7 +223,7 @@ def main() -> None:
     finally:
         server.shutdown()
         server.server_close()
-        print("\n[sbe-jira-mcp] 서버 종료 완료")
+        print("\n[sbe-jira-ui] 서버 종료 완료")
 
 
 if __name__ == "__main__":

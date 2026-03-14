@@ -80,22 +80,25 @@ def api_embedding_cache_status() -> dict:
         return {"ok": False, "error": str(e)}
 
 
-def api_embedding_build(users: list, api_key: str = None, token: str = None) -> dict:
-    """완료 이슈 임베딩 캐시 구축 (기존 캐시 재사용 — 이미 있는 이슈는 건너뜀)"""
+def api_embedding_build_stream(users: list, api_key: str = None, token: str = None):
+    """완료 이슈 임베딩 캐시 구축 (Generator / SSE 지원)"""
     if not api_key or not token:
         cfg = api_read()
         if not cfg.get("ok"):
-            return {"ok": False, "error": cfg.get("error")}
+            yield {"ok": False, "error": cfg.get("error")}
+            return
         env = cfg.get("env", {})
         token = token or env.get("JIRA_PAT_TOKEN", "")
         api_key = api_key or env.get("GEMINI_API_KEY", "")
 
     if not token:
-        return {"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}
+        yield {"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}
+        return
     if not api_key:
-        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+        yield {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+        return
 
-    # 기존 캐시 로드 (증분 갱신용)
+    # 기존 캐시 로드
     existing = _load_cache().get("issues", {})
     issues_data: dict = {}
     added = skipped = reused = 0
@@ -103,7 +106,9 @@ def api_embedding_build(users: list, api_key: str = None, token: str = None) -> 
     jira_counts: dict = {}
 
     user_jql = ", ".join(f'"{u}"' for u in users) if users else "currentUser()"
-
+    
+    # 1단계: 전체 이슈 목록 확보
+    all_issues = []
     for issuetype in EMBED_TYPES:
         jql = (f'assignee in ({user_jql}) AND status = "완료"'
                f' AND issuetype = "{issuetype}" ORDER BY updated DESC')
@@ -112,36 +117,54 @@ def api_embedding_build(users: list, api_key: str = None, token: str = None) -> 
             "fields": "summary,description,issuetype,updated",
         })
         try:
+            yield {"step": "jira_search", "issuetype": issuetype, "msg": f"{issuetype} 이슈 조회 중..."}
             resp = jira_get(token, f"{JIRA_BASE_URL}/rest/api/2/search?{params}")
+            fetched = resp.get("issues", [])
+            jira_counts[issuetype] = len(fetched)
+            all_issues.extend(fetched)
         except Exception as e:
-            return {"ok": False, "error": f"{issuetype} 조회 실패: {e}"}
+            yield {"ok": False, "error": f"{issuetype} 조회 실패: {e}"}
+            return
 
-        fetched = resp.get("issues", [])
-        jira_counts[issuetype] = len(fetched)
+    total_to_process = len(all_issues)
+    yield {"step": "start", "total": total_to_process, "msg": f"총 {total_to_process}건의 이슈 처리를 시작합니다."}
 
-        for issue in fetched:
-            key = issue.get("key", "")
-            # 이미 캐시에 있으면 벡터 재사용
-            if key in existing:
-                issues_data[key] = existing[key]
-                reused += 1
-                continue
-            text = _make_embed_text(issue)
-            try:
-                vector = _embed_text(api_key, text)
-            except Exception as e:
-                skipped += 1
-                if not first_embed_error:
-                    first_embed_error = f"{key}: {e}"
-                continue
-            f = issue.get("fields", {})
-            issues_data[key] = {
-                "issuetype": issuetype,
-                "summary": f.get("summary", ""),
-                "vector": vector,
-                "updated": (f.get("updated") or "")[:10],
-            }
-            added += 1
+    # 2단계: 개별 이슈 처리 (임베딩 등)
+    for i, issue in enumerate(all_issues):
+        key = issue.get("key", "")
+        issuetype = (issue.get("fields", {}) or {}).get("issuetype", {}).get("name", "")
+        
+        # 진행률 발송
+        yield {
+            "step": "progress",
+            "current": i + 1,
+            "total": total_to_process,
+            "key": key,
+            "msg": f"[{i+1}/{total_to_process}] {key} 처리 중..."
+        }
+
+        if key in existing:
+            issues_data[key] = existing[key]
+            reused += 1
+            continue
+
+        text = _make_embed_text(issue)
+        try:
+            vector = _embed_text(api_key, text)
+        except Exception as e:
+            skipped += 1
+            if not first_embed_error:
+                first_embed_error = f"{key}: {e}"
+            continue
+
+        f = issue.get("fields", {})
+        issues_data[key] = {
+            "issuetype": issuetype,
+            "summary": f.get("summary", ""),
+            "vector": vector,
+            "updated": (f.get("updated") or "")[:10],
+        }
+        added += 1
 
     cache = {
         "meta": {
@@ -152,10 +175,32 @@ def api_embedding_build(users: list, api_key: str = None, token: str = None) -> 
         "issues": issues_data,
     }
     _save_cache(cache)
-    result = {"ok": True, "total": len(issues_data), "added": added, "reused": reused, "skipped": skipped, "jira_counts": jira_counts}
+    
+    final_result = {
+        "ok": True, 
+        "total": len(issues_data), 
+        "added": added, 
+        "reused": reused, 
+        "skipped": skipped, 
+        "jira_counts": jira_counts,
+        "msg": "캐시 구축이 완료되었습니다."
+    }
     if first_embed_error:
-        result["embed_error"] = first_embed_error
-    return result
+        final_result["embed_error"] = first_embed_error
+    
+    yield {"step": "done", "result": final_result}
+
+
+def api_embedding_build(users: list, api_key: str = None, token: str = None) -> dict:
+    """완료 이슈 임베딩 캐시 구축 (기존 동기 방식 유지용 래퍼)"""
+    gen = api_embedding_build_stream(users, api_key, token)
+    last_res = {}
+    for item in gen:
+        if item.get("step") == "done":
+            return item["result"]
+        if item.get("ok") is False:
+            return item
+    return last_res
 
 
 def api_similar_issues(users: list, api_key: str = None, token: str = None) -> dict:

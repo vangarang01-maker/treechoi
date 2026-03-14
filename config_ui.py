@@ -8,15 +8,15 @@ config_ui.py — sbe-jira-mcp 설정 관리 웹 UI
 """
 
 import json
-import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import os
+import urllib.parse
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlparse
 
 from lib.settings import api_read, api_write, ENV_FIELDS
 from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail, jira_update_issue, api_jira_check
 from lib.gemini import api_gemini_chat, api_gemini_check, api_ai_verify, api_gemini_process_agent
-from lib.embedding import api_embedding_cache_status, api_embedding_build, api_similar_issues
+from lib.embedding import api_embedding_cache_status, api_embedding_build, api_embedding_build_stream, api_similar_issues
 
 PORT = 8765
 UI_DIR = Path(__file__).parent / "ui"
@@ -70,6 +70,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(api_gemini_check())
         elif path == "/api/embedding-cache-status":
             self._send_json(api_embedding_cache_status())
+        elif path == "/api/embedding-build-stream":
+            parsed = urllib.parse.urlparse(self.path)
+            qs = urllib.parse.parse_qs(parsed.query)
+            users = qs.get("users", [])
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            
+            for progress in api_embedding_build_stream(users):
+                self.wfile.write(f"data: {json.dumps(progress, ensure_ascii=False)}\n\n".encode("utf-8"))
+                self.wfile.flush()
         else:
             self.send_response(404)
             self.end_headers()

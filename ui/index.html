@@ -162,7 +162,15 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
                 <button class="btn-check" onclick="addUser()">+ 추가</button>
               </div>
             </div>
-            <div class="cache-status" id="cache-status">캐시 정보 로딩 중...</div>
+            <div id="build-progress-area" style="display:none; margin-bottom: 15px;">
+              <div class="progress-info">
+                <span id="build-msg">준비 중...</span>
+                <span id="build-percent">0%</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div id="build-bar" class="progress-bar-fill" style="width: 0%"></div>
+              </div>
+            </div>
             <div class="collapsible-actions">
               <button type="button" class="btn btn-secondary" id="build-btn" onclick="buildCache()">🔄 캐시 구축 / 갱신</button>
             </div>

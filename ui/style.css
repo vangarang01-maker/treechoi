@@ -622,6 +622,28 @@ body {
 .sim-key { font-family: monospace; color: var(--accent); flex-shrink: 0; font-size: 11px; }
 .sim-summary { color: var(--text-muted); line-height: 1.4; }
 
+/* ── Progress Bar ── */
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.progress-bar-bg {
+  height: 6px;
+  background: var(--bg);
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width .3s ease;
+  box-shadow: 0 0 8px var(--accent);
+}
+
 /* ── AI검증 ── */
 .btn-ai-verify {
   align-self: flex-start;

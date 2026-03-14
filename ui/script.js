@@ -786,31 +786,80 @@ async function loadCacheStatus() {
 
 async function buildCache() {
   const btn = document.getElementById('build-btn');
+  const progressArea = document.getElementById('build-progress-area');
+  const buildMsg = document.getElementById('build-msg');
+  const buildBar = document.getElementById('build-bar');
+  const buildPercent = document.getElementById('build-percent');
+  
+  if (!similarUsers || similarUsers.length === 0) {
+    showToast('⚠ 대상 사용자를 1명 이상 추가해주세요.', 'error');
+    return;
+  }
+
   btn.disabled = true;
   btn.textContent = '🔄 구축 중...';
-  try {
-    const res = await fetch('/api/embedding-build', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({users: similarUsers, env: getEnv()}),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      const detail = data.embed_error ? ` (오류: ${data.embed_error})` : '';
-      const jiraInfo = data.jira_counts
-        ? ' Jira: ' + Object.entries(data.jira_counts).map(([t,n]) => `${t} ${n}건`).join(', ')
-        : '';
-      showToast(`✓ 완료 — ${data.total}건 (신규 ${data.added}, 재사용 ${data.reused}, 실패 ${data.skipped})${jiraInfo}${detail}`, data.skipped > 0 ? 'error' : 'success');
-      loadCacheStatus();
-    } else {
+  progressArea.style.display = 'block';
+  buildBar.style.width = '0%';
+  buildPercent.textContent = '0%';
+  buildMsg.textContent = '준비 중...';
+
+  const userParams = similarUsers.map(u => `users=${encodeURIComponent(u)}`).join('&');
+  const wsUrl = `/api/embedding-build-stream?${userParams}`;
+  
+  const ev = new EventSource(wsUrl);
+
+  ev.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    
+    if (data.ok === false) {
       showToast('❌ ' + data.error, 'error');
+      ev.close();
+      btn.disabled = false;
+      btn.textContent = '🔄 캐시 구축 / 갱신';
+      return;
     }
-  } catch(e) {
-    showToast('❌ 구축 실패: ' + e.message, 'error');
-  } finally {
+
+    if (data.step === 'jira_search') {
+      buildMsg.textContent = data.msg;
+    } else if (data.step === 'start') {
+      buildMsg.textContent = data.msg;
+    } else if (data.step === 'progress') {
+      const p = Math.floor((data.current / data.total) * 100);
+      buildBar.style.width = p + '%';
+      buildPercent.textContent = p + '%';
+      buildMsg.textContent = `${data.key} 처리 중...`;
+    } else if (data.step === 'done') {
+      const res = data.result;
+      const detail = res.embed_error ? ` (오류: ${res.embed_error})` : '';
+      const jiraInfo = res.jira_counts
+        ? ' Jira: ' + Object.entries(res.jira_counts).map(([t,n]) => `${t} ${n}건`).join(', ')
+        : '';
+      
+      showToast(`✓ 완료 — ${res.total}건 (신규 ${res.added}, 재사용 ${res.reused}, 실패 ${res.skipped})${jiraInfo}${detail}`, res.skipped > 0 ? 'error' : 'success');
+      
+      buildMsg.textContent = '구축 완료!';
+      buildBar.style.width = '100%';
+      buildPercent.textContent = '100%';
+      
+      ev.close();
+      btn.disabled = false;
+      btn.textContent = '🔄 캐시 구축 / 갱신';
+      loadCacheStatus();
+      
+      setTimeout(() => {
+        progressArea.style.display = 'none';
+      }, 3000);
+    }
+  };
+
+  ev.onerror = (e) => {
+    showToast('❌ 연결 오류 또는 중단됨', 'error');
+    console.error('SSE Error:', e);
+    ev.close();
     btn.disabled = false;
     btn.textContent = '🔄 캐시 구축 / 갱신';
-  }
+    progressArea.style.display = 'none';
+  };
 }
 
 async function searchSimilar() {

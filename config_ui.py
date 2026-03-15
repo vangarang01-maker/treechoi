@@ -14,8 +14,8 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 from lib.settings import api_read, api_write, ENV_FIELDS
-from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail, jira_update_issue, api_jira_check
-from lib.gemini import api_gemini_chat, api_gemini_check, api_ai_verify, api_gemini_process_agent
+from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail, jira_update_issue, jira_get_transitions, api_jira_check
+from lib.gemini import api_gemini_chat, api_gemini_check, api_ai_verify, api_draft_comment, api_gemini_process_agent
 from lib.embedding import api_embedding_cache_status, api_embedding_build, api_embedding_build_stream, api_similar_issues
 
 PORT = 8765
@@ -187,6 +187,27 @@ class Handler(BaseHTTPRequestHandler):
                         sim_issues = [jira_get_issue_detail(token, k) for k in similar_keys]
                         self._send_json(api_ai_verify(
                             open_issue, sim_issues,
+                            api_key=env_in.get("GEMINI_API_KEY"),
+                            model=env_in.get("GEMINI_MODEL")
+                        ))
+            elif path == "/api/draft-comment":
+                issue_key = body.get("issue_key", "").strip()
+                best_key = body.get("best_key", "").strip()
+                env_in = body.get("env", {})
+                if not issue_key or not best_key:
+                    self._send_json({"ok": False, "error": "issue_key와 best_key가 필요합니다."}, 400)
+                else:
+                    token = env_in.get("JIRA_PAT_TOKEN")
+                    if not token:
+                        cfg = api_read()
+                        token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
+                    if not token:
+                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}, 400)
+                    else:
+                        open_issue = jira_get_issue_detail(token, issue_key)
+                        best_issue = jira_get_issue_detail(token, best_key)
+                        self._send_json(api_draft_comment(
+                            open_issue, best_issue,
                             api_key=env_in.get("GEMINI_API_KEY"),
                             model=env_in.get("GEMINI_MODEL")
                         ))

@@ -1,5 +1,6 @@
 const JIRA_KEYS  = ['JIRA_PAT_TOKEN', 'JIRA_USERNAME'];
 const GEMINI_KEYS = ['GEMINI_API_KEY', 'GEMINI_MODEL'];
+const JIRA_BASE_URL = "https://jira.sinc.co.kr";
 
 // ── 페이지 전환 ──
 function switchPage(name, el) {
@@ -137,6 +138,7 @@ async function loadConfig() {
         updateDot(f.key);
       }
     });
+    const modelInp = document.getElementById('inp-GEMINI_MODEL');
     const badge = document.getElementById('gemini-model-badge');
     if (modelInp && badge) badge.textContent = modelInp.value || 'gemini';
 
@@ -886,9 +888,20 @@ async function searchSimilar() {
       results.innerHTML = '<div class="empty-hint"><div class="big">✅</div><div>미해결 이슈가 없습니다</div></div>';
       return;
     }
-    results.innerHTML = '';
+
+    // 유형별 그룹화
+    const groups = {};
     for (const item of data.results) {
-      results.appendChild(buildSimilarCard(item));
+      const type = item.issuetype || '기타';
+      if (!groups[type]) groups[type] = [];
+      groups[type].push(item);
+    }
+
+    results.innerHTML = '';
+    // 유형명으로 정렬하여 출력
+    const sortedTypes = Object.keys(groups).sort();
+    for (const type of sortedTypes) {
+      results.appendChild(buildTypeSection(type, groups[type]));
     }
   } catch(e) {
     results.innerHTML = `<div class="error-card">⚠ ${escHtml(e.message)}</div>`;
@@ -896,6 +909,38 @@ async function searchSimilar() {
     btn.disabled = false;
     btn.textContent = '🔍 유사 이슈 검색';
   }
+}
+
+function buildTypeSection(type, items) {
+  const section = document.createElement('div');
+  section.className = 'type-section';
+  
+  const header = document.createElement('div');
+  header.className = 'type-section-header';
+  header.onclick = () => toggleTypeSection(header);
+  header.innerHTML = `
+    <span class="type-section-title">${escHtml(type)}</span>
+    <span class="type-section-count">${items.length}건</span>
+    <span class="type-section-arrow">▼</span>
+  `;
+  
+  const body = document.createElement('div');
+  body.className = 'type-section-body active';
+  for (const item of items) {
+    body.appendChild(buildSimilarCard(item));
+  }
+  
+  section.appendChild(header);
+  section.appendChild(body);
+  return section;
+}
+
+function toggleTypeSection(header) {
+  const body = header.nextElementSibling;
+  const arrow = header.querySelector('.type-section-arrow');
+  const isActive = body.classList.toggle('active');
+  arrow.textContent = isActive ? '▼' : '▶';
+  header.classList.toggle('collapsed', !isActive);
 }
 
 function buildSimilarCard(item) {
@@ -1001,11 +1046,16 @@ async function verifyIssue(issueKey, btn) {
     const data = await res.json();
     if (data.ok) {
       const bestHtml = data.best_key
-        ? `<div class="ai-verify-best">✅ 최적 매칭: <span class="sim-key">${escHtml(data.best_key)}</span></div>`
+        ? `<div class="ai-verify-best">✅ 최적 매칭: <a class="sim-key" href="https://jira.sinc.co.kr/browse/${escHtml(data.best_key)}" target="_blank" rel="noopener">${escHtml(data.best_key)}</a></div>`
+        : '';
+      const draftBtnHtml = data.best_key
+        ? `<button class="btn-draft" onclick="draftComment('${escHtml(issueKey)}', '${escHtml(data.best_key)}', this)">✍ 처리 초안 작성</button>
+           <div class="draft-area"></div>`
         : '';
       resultEl.innerHTML = `
         ${bestHtml}
         <div class="ai-verify-reason">${escHtml(data.reason)}</div>
+        ${draftBtnHtml}
       `;
     } else {
       resultEl.innerHTML = `<div class="ai-verify-error">⚠ ${escHtml(data.error)}</div>`;
@@ -1015,6 +1065,90 @@ async function verifyIssue(issueKey, btn) {
   } finally {
     btn.disabled = false;
     btn.textContent = '🤖 AI검증';
+  }
+}
+
+// ── 처리 초안 자동 생성 ──
+
+async function draftComment(issueKey, bestKey, btn) {
+  const draftArea = btn.nextElementSibling;
+  btn.disabled = true;
+  btn.textContent = '초안 생성 중...';
+  draftArea.innerHTML = `<div class="ai-verify-loading">
+    <div class="dot-spin"><span></span><span></span><span></span></div>
+    Gemini가 처리 초안을 작성 중...
+  </div>`;
+
+  try {
+    const res = await fetch('/api/draft-comment', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        issue_key: issueKey,
+        best_key: bestKey,
+        env: getEnv()
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const meta = data.latency_ms ? `<span class="draft-meta">${data.latency_ms}ms · ${data.model || ''}</span>` : '';
+      draftArea.innerHTML = `
+        <div class="draft-box">
+          <div class="draft-header">
+            <span>✍ AI 처리 초안</span>
+            ${meta}
+          </div>
+          <textarea class="draft-textarea" rows="5">${escHtml(data.draft)}</textarea>
+          <div class="draft-footer">
+            <button class="btn-form-cancel" onclick="this.closest('.draft-box').remove()">취소</button>
+            <button class="btn-draft-submit" onclick="submitDraft('${escHtml(issueKey)}', this)">📝 Jira에 댓글 등록</button>
+          </div>
+        </div>
+      `;
+      btn.style.display = 'none';
+    } else {
+      draftArea.innerHTML = `<div class="ai-verify-error">⚠ ${escHtml(data.error)}</div>`;
+    }
+  } catch(e) {
+    draftArea.innerHTML = `<div class="ai-verify-error">⚠ ${escHtml(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✍ 처리 초안 작성';
+  }
+}
+
+async function submitDraft(issueKey, btn) {
+  const draftBox = btn.closest('.draft-box');
+  const textarea = draftBox.querySelector('.draft-textarea');
+  const comment = textarea.value.trim();
+  if (!comment) { showToast('⚠ 댓글 내용이 비어있습니다.', 'error'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '등록 중...';
+
+  try {
+    const res = await fetch('/api/jira-update', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        key: issueKey,
+        comment: comment,
+        env: getEnv()
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`✅ ${issueKey} 댓글 등록 완료`, 'success');
+      draftBox.innerHTML = `<div class="draft-success">✅ 댓글이 성공적으로 등록되었습니다.</div>`;
+    } else {
+      showToast(`❌ 오류: ${data.error}`, 'error');
+      btn.disabled = false;
+      btn.textContent = '📝 Jira에 댓글 등록';
+    }
+  } catch(e) {
+    showToast('❌ 네트워크 오류', 'error');
+    btn.disabled = false;
+    btn.textContent = '📝 Jira에 댓글 등록';
   }
 }
 

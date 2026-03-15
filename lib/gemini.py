@@ -96,14 +96,19 @@ def api_ai_verify(open_issue: dict, similar_issues: list, api_key: str = None, m
     lines.append(
         "위 후보 중 현재 미해결 이슈와 가장 유사하여 처리 참고가 될 이슈 1건을 선택하고, "
         "이유를 2~3문장으로 설명해주세요.\n"
-        "응답 형식:\n선택: {이슈키}\n이유: {설명}"
+        "반드시 아래 형식을 정확히 지켜서 응답하세요. 다른 형식은 허용되지 않습니다:\n"
+        "선택: {이슈키}\n"
+        "이유: {설명}\n\n"
+        "예시:\n"
+        "선택: SCM3-12345\n"
+        "이유: 두 이슈 모두 EP 화면 권한 요청이며 대상 시스템과 처리 방법이 동일합니다."
     )
     prompt = ''.join(lines)
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     payload = json.dumps({
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 512},
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1024},
     }).encode("utf-8")
     ctx = ssl.create_default_context()
 
@@ -115,18 +120,21 @@ def api_ai_verify(open_issue: dict, similar_issues: list, api_key: str = None, m
         )
         with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        reply = (data.get("candidates", [{}])[0]
-                 .get("content", {}).get("parts", [{}])[0].get("text", ""))
+        parts = (data.get("candidates", [{}])[0]
+                 .get("content", {}).get("parts", []))
+        # thinking 모델은 parts[0]이 thought 내용 — thought=True가 아닌 첫 번째 part만 사용
+        reply = next((p.get("text", "") for p in parts if not p.get("thought")), "")
 
         best_key = ""
         reason = reply
-        # 마크다운 볼드(**) 포함 유연 파싱
-        m = re.search(r'선택\s*[:：]\s*\*{0,2}([A-Z]+-\d+)\*{0,2}', reply)
+        # "선택: SCM3-XXXXX" 형식 파싱 (마크다운 볼드, 공백 변형 허용)
+        m = re.search(r'선택\s*[:：]\s*\*{0,2}([A-Z][A-Z0-9]*-\d+)\*{0,2}', reply)
         if m:
             best_key = m.group(1)
-        # 못 찾으면 응답 전체에서 첫 번째 이슈 키 추출
+        # 못 찾으면 "이유:" 이전 텍스트에서만 이슈 키 탐색 (이유 설명의 키와 혼동 방지)
         if not best_key:
-            keys = re.findall(r'[A-Z]+-\d+', reply)
+            before_reason = re.split(r'이유\s*[:：]', reply)[0]
+            keys = re.findall(r'[A-Z][A-Z0-9]*-\d+', before_reason)
             if keys:
                 best_key = keys[0]
         m2 = re.search(r'이유\s*[:：]\s*(.+)', reply, re.DOTALL)
@@ -134,6 +142,74 @@ def api_ai_verify(open_issue: dict, similar_issues: list, api_key: str = None, m
             reason = m2.group(1).strip()
 
         return {"ok": True, "best_key": best_key, "reason": reason}
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.loads(e.read().decode("utf-8", errors="replace"))
+            msg = err.get("error", {}).get("message", f"HTTP {e.code}")
+        except Exception:
+            msg = f"HTTP {e.code}"
+        return {"ok": False, "error": msg}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def api_draft_comment(open_issue: dict, best_match: dict, api_key: str = None, model: str = None) -> dict:
+    """유사 완료 이슈를 참고하여 현재 이슈에 달 댓글 초안을 Gemini로 생성"""
+    if not api_key or not model:
+        cfg = api_read()
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+
+    prompt = f"""당신은 IT 서비스 담당자의 업무 보조 AI입니다.
+아래 [현재 미해결 이슈]를 처리해야 합니다.
+과거에 유사하게 처리 완료된 [참고 완료 이슈]의 내용을 참고하여, 현재 이슈에 달 **처리 댓글 초안**을 작성해주세요.
+
+작성 규칙:
+1. 실제 Jira 댓글로 바로 등록할 수 있는 실무적이고 구체적인 문체로 작성
+2. 참고 이슈의 처리 방법/절차를 현재 이슈 맥락에 맞게 변환
+3. 불필요한 인사말이나 서론 없이 핵심 처리 내용만 작성
+4. 200자 내외로 간결하게 작성
+
+[현재 미해결 이슈]
+키: {open_issue['key']}  타입: {open_issue.get('issuetype', '')}
+제목: {open_issue['summary']}
+내용: {open_issue.get('description', '(내용 없음)')}
+{('결재요청: ' + open_issue['blossom']) if open_issue.get('blossom') else ''}
+
+[참고 완료 이슈]
+키: {best_match['key']}  타입: {best_match.get('issuetype', '')}
+제목: {best_match['summary']}
+내용: {best_match.get('description', '(내용 없음)')}
+{('결재요청: ' + best_match['blossom']) if best_match.get('blossom') else ''}
+
+댓글 초안:"""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    payload = json.dumps({
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 512},
+    }).encode("utf-8")
+    ctx = ssl.create_default_context()
+
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        latency = int((time.time() - t0) * 1000)
+        parts = (data.get("candidates", [{}])[0]
+                 .get("content", {}).get("parts", []))
+        reply = next((p.get("text", "") for p in parts if not p.get("thought")), "")
+        return {"ok": True, "draft": reply.strip(), "latency_ms": latency, "model": model}
     except urllib.error.HTTPError as e:
         try:
             err = json.loads(e.read().decode("utf-8", errors="replace"))
@@ -208,8 +284,9 @@ JSON 응답:"""
         with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         
-        raw_reply = (data.get("candidates", [{}])[0]
-                     .get("content", {}).get("parts", [{}])[0].get("text", ""))
+        parts = (data.get("candidates", [{}])[0]
+                 .get("content", {}).get("parts", []))
+        raw_reply = next((p.get("text", "") for p in parts if not p.get("thought")), "")
         
         result = json.loads(raw_reply)
         return {"ok": True, "result": result}

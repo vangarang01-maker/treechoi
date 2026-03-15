@@ -84,6 +84,16 @@ class Handler(BaseHTTPRequestHandler):
             for progress in api_embedding_build_stream(users):
                 self.wfile.write(f"data: {json.dumps(progress, ensure_ascii=False)}\n\n".encode("utf-8"))
                 self.wfile.flush()
+        elif path == "/api/jira-transitions":
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            key = qs.get("key", [None])[0]
+            if not key:
+                self._send_json({"error": "key가 필요합니다."}, 400)
+                return
+            cfg = api_read()
+            token = cfg.get("env", {}).get("JIRA_PAT_TOKEN", "")
+            self._send_json(jira_get_transitions(token, key))
         else:
             self.send_response(404)
             self.end_headers()
@@ -145,6 +155,19 @@ class Handler(BaseHTTPRequestHandler):
                     api_key=env_in.get("GEMINI_API_KEY"),
                     token=env_in.get("JIRA_PAT_TOKEN")
                 ))
+            elif path == "/api/jira-update":
+                key = body.get("key")
+                fields = body.get("fields")
+                transition = body.get("transition")
+                comment = body.get("comment")
+                env_in = body.get("env", {})
+                if not key:
+                    self._send_json({"error": "key가 필요합니다."}, 400)
+                else:
+                    self._send_json(jira_update_issue(
+                        token=env_in.get("JIRA_PAT_TOKEN"),
+                        key=key, fields=fields, transition=transition, comment=comment
+                    ))
             elif path == "/api/ai-verify":
                 issue_key = body.get("issue_key", "").strip()
                 similar_keys = body.get("similar_keys", [])

@@ -932,6 +932,37 @@ function buildSimilarCard(item) {
     ${errorBadge}
     <div class="similar-list">${similarHtml}</div>
     ${verifyBtnHtml}
+    
+    <div class="card-actions">
+      <button class="btn-action" onclick="toggleCommentForm('${escHtml(item.key)}', this)">
+        <i class="far fa-comment-dots"></i> 댓글
+      </button>
+      <button class="btn-action" onclick="toggleTransitionForm('${escHtml(item.key)}', this)">
+        <i class="fas fa-exchange-alt"></i> 상태
+      </button>
+      <a href="${JIRA_BASE_URL}/browse/${escHtml(item.key)}" target="_blank" class="btn-action" style="text-decoration:none">
+        <i class="fas fa-external-link-alt"></i> Jira
+      </a>
+    </div>
+
+    <!-- 액션 폼 영역 (기본 숨김) -->
+    <div id="comment-form-${escHtml(item.key)}" class="action-form" style="display:none">
+      <textarea placeholder="댓글 내용을 입력하세요..." rows="2"></textarea>
+      <div class="action-form-footer">
+        <button class="btn-form-cancel" onclick="toggleCommentForm('${escHtml(item.key)}')">취소</button>
+        <button class="btn-form-submit" onclick="submitComment('${escHtml(item.key)}')">등록</button>
+      </div>
+    </div>
+
+    <div id="transition-form-${escHtml(item.key)}" class="action-form" style="display:none">
+      <select id="trans-select-${escHtml(item.key)}">
+        <option value="">불러오는 중...</option>
+      </select>
+      <div class="action-form-footer">
+        <button class="btn-form-cancel" onclick="toggleTransitionForm('${escHtml(item.key)}')">취소</button>
+        <button class="btn-form-submit" onclick="submitTransition('${escHtml(item.key)}')">변경</button>
+      </div>
+    </div>
   `;
   // 카드에 similarKeys 저장 (DOM 접근 없이 클로저 대신 data속성 사용)
   wrap.dataset.issueKey = item.key;
@@ -984,6 +1015,129 @@ async function verifyIssue(issueKey, btn) {
   } finally {
     btn.disabled = false;
     btn.textContent = '🤖 AI검증';
+  }
+}
+
+// ── 이슈 인라인 액션 핸들러 ──
+
+function toggleCommentForm(key, btn) {
+  const form = document.getElementById(`comment-form-${key}`);
+  const transForm = document.getElementById(`transition-form-${key}`);
+  if (transForm) transForm.style.display = 'none';
+
+  if (form) {
+    if (form.style.display === 'none') {
+      form.style.display = 'flex';
+      form.querySelector('textarea').focus();
+    } else {
+      form.style.display = 'none';
+    }
+  }
+}
+
+async function submitComment(key) {
+  const form = document.getElementById(`comment-form-${key}`);
+  const textarea = form.querySelector('textarea');
+  const comment = textarea.value.trim();
+  const btn = form.querySelector('.btn-form-submit');
+
+  if (!comment) return;
+
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    const res = await fetch('/api/jira-update', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        key: key,
+        comment: comment,
+        env: getEnv()
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`✅ ${key} 댓글 등록 완료`, 'success');
+      form.style.display = 'none';
+      textarea.value = '';
+    } else {
+      showToast(`❌ 오류: ${data.error}`, 'error');
+    }
+  } catch(e) {
+    showToast(`❌ 네트워크 오류`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '등록';
+  }
+}
+
+async function toggleTransitionForm(key, btn) {
+  const form = document.getElementById(`transition-form-${key}`);
+  const commForm = document.getElementById(`comment-form-${key}`);
+  if (commForm) commForm.style.display = 'none';
+
+  if (!form) return;
+
+  if (form.style.display === 'none') {
+    form.style.display = 'flex';
+    const select = document.getElementById(`trans-select-${key}`);
+    // 아직 안불러왔으면(기본옵션이 '불러오는 중...') 가져오기
+    if (select.options.length === 1 && select.options[0].value === "") {
+      try {
+        const res = await fetch(`/api/jira-transitions?key=${key}`);
+        const data = await res.json();
+        if (data.ok) {
+          select.innerHTML = data.transitions.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('');
+          if (data.transitions.length === 0) {
+            select.innerHTML = '<option value="">변경 가능한 상태 없음</option>';
+          }
+        } else {
+          select.innerHTML = `<option value="">불러오기 실패</option>`;
+        }
+      } catch(e) {
+        select.innerHTML = `<option value="">에러 발생</option>`;
+      }
+    }
+  } else {
+    form.style.display = 'none';
+  }
+}
+
+async function submitTransition(key) {
+  const form = document.getElementById(`transition-form-${key}`);
+  const select = document.getElementById(`trans-select-${key}`);
+  const tid = select.value;
+  const btn = form.querySelector('.btn-form-submit');
+
+  if (!tid) return;
+
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    const res = await fetch('/api/jira-update', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        key: key,
+        transition: tid,
+        env: getEnv()
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`✅ ${key} 상태 변경 완료`, 'success');
+      form.style.display = 'none';
+      // UI상의 현재 상태 뱃지도 업데이트해주면 좋지만, 일단 토스트로 만족
+    } else {
+      showToast(`❌ 오류: ${data.error}`, 'error');
+    }
+  } catch(e) {
+    showToast(`❌ 네트워크 오류`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '변경';
   }
 }
 

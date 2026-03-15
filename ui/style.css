@@ -672,3 +672,42 @@ body {
   color: var(--text-muted); padding: 4px 0;
 }
 .ai-verify-error { color: var(--error); font-size: 12px; }
+
+/* ── 이슈 인라인 액션 ── */
+.card-actions {
+  display: flex; gap: 8px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.btn-action {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 10px;
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  cursor: pointer; transition: all .15s;
+  display: flex; align-items: center; gap: 4px;
+}
+.btn-action:hover { border-color: var(--accent); color: var(--accent); background: rgba(124,131,245,.05); }
+.btn-action i { font-size: 11px; }
+
+.action-form {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px; margin-top: 8px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.action-form textarea, .action-form select {
+  width: 100%; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px; color: var(--text); font-size: 12px;
+  outline: none; transition: border-color .15s;
+}
+.action-form textarea:focus, .action-form select:focus { border-color: var(--accent); }
+.action-form-footer { display: flex; justify-content: flex-end; gap: 6px; }
+
+.btn-form-submit {
+  background: var(--accent); border: none; border-radius: 5px;
+  padding: 4px 12px; font-size: 11px; font-weight: 600; color: white;
+  cursor: pointer;
+}
+.btn-form-cancel {
+  background: transparent; border: 1px solid var(--border); border-radius: 5px;
+  padding: 4px 12px; font-size: 11px; color: var(--text-muted);
+  cursor: pointer;
+}

@@ -79,6 +79,16 @@ def jira_update_issue(token: str, key: str, fields: dict = None, transition: str
         return {"ok": False, "error": str(e)}
 
 
+def jira_get_transitions(token: str, key: str) -> dict:
+    """사용 가능한 이슈 상태 변경(Transition) 목록 조회"""
+    url = f"{JIRA_BASE_URL}/rest/api/2/issue/{key}/transitions"
+    try:
+        data = jira_get(token, url)
+        return {"ok": True, "transitions": data.get("transitions", [])}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def _extract_blossom_body(xml_str: str) -> str:
     """customfield_10848 XML에서 요청내용 + 기안의견 텍스트 추출"""
     if not xml_str:

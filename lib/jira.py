@@ -133,7 +133,7 @@ def jira_get_issue_detail(token: str, key: str) -> dict:
 def api_chat(query: str, token: str = None) -> dict:
     """이슈 키 또는 JQL로 Jira 검색"""
     if not token:
-        cfg = api_read()
+        cfg = api_read(mask_sensitive=False)
         if not cfg.get("ok"):
             return {"error": cfg.get("error", "설정 로드 실패")}
         env = cfg.get("env", {})

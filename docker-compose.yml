@@ -12,4 +12,8 @@ services:
     volumes:
       # 임베딩 캐시를 호스트에 보관 (컨테이너 재시작해도 유지)
       - ./data:/app/data
+      # 프롬프트 파일을 호스트에 마운트 — docker compose restart 없이 수정 가능
+      - ./prompts:/app/prompts
+      - ./ui:/app/ui
+      - ./lib:/app/lib
     restart: unless-stopped

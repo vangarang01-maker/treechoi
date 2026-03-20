@@ -15,9 +15,12 @@ def _is_docker_env() -> bool:
     return any(os.environ.get(k) for k in _ENV_KEYS)
 
 ENV_FIELDS = [
-    {"key": "JIRA_PAT_TOKEN", "label": "Jira PAT Token",    "sensitive": True,  "placeholder": "Personal Access Token"},
-    {"key": "JIRA_USERNAME",  "label": "Jira 사용자명(사번)", "sensitive": False, "placeholder": "223733"},
-    {"key": "GEMINI_API_KEY", "label": "Gemini API Key",    "sensitive": True,  "placeholder": "AIzaSy..."},
+    {"key": "JIRA_PAT_TOKEN", "label": "Jira PAT Token",    "sensitive": True,  "placeholder": "Personal Access Token",
+     "docker_placeholder": "내 Jira PAT 입력 (Jira 프로필 → 개인 액세스 토큰 메뉴에서 발급)"},
+    {"key": "JIRA_USERNAME",  "label": "Jira 사용자명(사번)", "sensitive": False, "placeholder": "223733",
+     "docker_placeholder": "내 사번 입력 (예: 223733)"},
+    {"key": "GEMINI_API_KEY", "label": "Gemini API Key",    "sensitive": True,  "placeholder": "AIzaSy...",
+     "docker_placeholder": "내 Gemini API 키 입력 (aistudio.google.com → Get API key에서 발급)"},
     {"key": "GEMINI_MODEL",   "label": "Gemini 모델",        "sensitive": False, "type": "select", "placeholder": "",
      "options": [
          {"value": "gemini-2.5-flash",      "label": "gemini-2.5-flash (기본값)"},
@@ -42,10 +45,22 @@ def _find_project_key(data: dict) -> str | None:
     return None
 
 
-def api_read() -> dict:
+_SENSITIVE_KEYS = {"GEMINI_API_KEY", "JIRA_PAT_TOKEN", "JIRA_USERNAME"}
+
+
+def _docker_env_raw() -> dict:
+    """Docker 환경변수를 마스킹 없이 그대로 반환 (서버 내부 전용)"""
+    return {k: os.environ.get(k, "") for k in _ENV_KEYS}
+
+
+def api_read(mask_sensitive: bool = True) -> dict:
     # ── Docker / 환경변수 모드 ─────────────────────────────
     if _is_docker_env():
-        env = {k: os.environ.get(k, "") for k in _ENV_KEYS}
+        env = {}
+        for k in _ENV_KEYS:
+            v = os.environ.get(k, "")
+            # 민감 정보는 값이 있어도 "__set__"으로 마스킹 — 평문 노출 방지
+            env[k] = ("__set__" if (k in _SENSITIVE_KEYS and v) else v) if mask_sensitive else v
         return {"ok": True, "env": env, "projectKey": "__env__"}
     # ── 로컬 개발: claude.json 폴백 ───────────────────────
     try:

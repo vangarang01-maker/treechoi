@@ -9,19 +9,40 @@ config_ui.py — sbe-jira-mcp 설정 관리 웹 UI
 
 import json
 import os
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from lib.settings import api_read, api_write, ENV_FIELDS
+from lib.settings import api_read, api_write, ENV_FIELDS, _is_docker_env
 from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail, jira_update_issue, jira_get_transitions, api_jira_check
 from lib.gemini import api_gemini_chat, api_gemini_check, api_ai_verify, api_draft_comment, api_gemini_process_agent
 from lib.embedding import api_embedding_cache_status, api_embedding_build, api_embedding_build_stream, api_similar_issues
+from lib.wizard import api_wizard_detect, api_wizard_draft
+from lib.prompts import load_prompt, PROMPTS_DIR
 
 PORT = 8765
 UI_DIR = Path(__file__).parent / "ui"
 
 _SHORTCUTS_KEYS = list(SHORTCUTS.keys())
+
+# ── 안내데스크봇 시스템 프롬프트 (파일에서 로드) ─────────────────────────────
+
+def _get_helpdesk_system_prompt() -> str:
+    """prompts/helpdesk_system.txt 에서 로드. 파일 없으면 빈 문자열 반환."""
+    try:
+        return load_prompt("helpdesk_system")
+    except FileNotFoundError:
+        return ""
+
+
+def _resolve_token(env_in: dict) -> str:
+    """Docker 모드면 클라이언트 값만 사용, 로컬이면 .env fallback 허용"""
+    token = env_in.get("JIRA_PAT_TOKEN", "")
+    if token or _is_docker_env():
+        return token
+    cfg = api_read(mask_sensitive=False)
+    return (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
+
 
 # ── HTML 빌드 ─────────────────────────────────────────────────────────────────
 
@@ -74,14 +95,15 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
             users = qs.get("users", [])
-            
+            issuetype = qs.get("issuetype", [None])[0]
+
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
             self.end_headers()
-            
-            for progress in api_embedding_build_stream(users):
+
+            for progress in api_embedding_build_stream(users, issuetype=issuetype):
                 self.wfile.write(f"data: {json.dumps(progress, ensure_ascii=False)}\n\n".encode("utf-8"))
                 self.wfile.flush()
         elif path == "/api/jira-transitions":
@@ -91,9 +113,19 @@ class Handler(BaseHTTPRequestHandler):
             if not key:
                 self._send_json({"error": "key가 필요합니다."}, 400)
                 return
-            cfg = api_read()
+            cfg = api_read(mask_sensitive=False)
             token = cfg.get("env", {}).get("JIRA_PAT_TOKEN", "")
             self._send_json(jira_get_transitions(token, key))
+        elif path == "/api/wizard-detect":
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            key = qs.get("key", [None])[0]
+            if not key:
+                self._send_json({"ok": False, "error": "key가 필요합니다."}, 400)
+                return
+            cfg = api_read(mask_sensitive=False)
+            token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
+            self._send_json(api_wizard_detect(token, key))
         else:
             self.send_response(404)
             self.end_headers()
@@ -117,9 +149,7 @@ class Handler(BaseHTTPRequestHandler):
                 ))
             elif path == "/api/jira-check":
                 env_in = body.get("env", {})
-                self._send_json(api_jira_check(
-                    token=env_in.get("JIRA_PAT_TOKEN")
-                ))
+                self._send_json(api_jira_check(token=_resolve_token(env_in)))
             elif path == "/api/chat":
                 query = body.get("query", "").strip()
                 env_in = body.get("env", {})
@@ -137,7 +167,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json(api_gemini_chat(
                         history, message,
                         api_key=env_in.get("GEMINI_API_KEY"),
-                        model=env_in.get("GEMINI_MODEL")
+                        model=env_in.get("GEMINI_MODEL"),
+                        system_prompt=_get_helpdesk_system_prompt(),
                     ))
             elif path == "/api/embedding-build":
                 users = body.get("users", [])
@@ -175,13 +206,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not issue_key or not similar_keys:
                     self._send_json({"ok": False, "error": "issue_key와 similar_keys가 필요합니다."}, 400)
                 else:
-                    token = env_in.get("JIRA_PAT_TOKEN")
+                    token = _resolve_token(env_in)
                     if not token:
-                        cfg = api_read()
-                        token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
-                    
-                    if not token:
-                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."} , 400)
+                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}, 400)
                     else:
                         open_issue = jira_get_issue_detail(token, issue_key)
                         sim_issues = [jira_get_issue_detail(token, k) for k in similar_keys]
@@ -197,10 +224,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not issue_key or not best_key:
                     self._send_json({"ok": False, "error": "issue_key와 best_key가 필요합니다."}, 400)
                 else:
-                    token = env_in.get("JIRA_PAT_TOKEN")
-                    if not token:
-                        cfg = api_read()
-                        token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
+                    token = _resolve_token(env_in)
                     if not token:
                         self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}, 400)
                     else:
@@ -228,13 +252,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not action or not action.get("issue_key"):
                     self._send_json({"ok": False, "error": "action 파라미터가 유효하지 않습니다."}, 400)
                 else:
-                    token = env_in.get("JIRA_PAT_TOKEN")
+                    token = _resolve_token(env_in)
                     if not token:
-                        cfg = api_read()
-                        token = (cfg.get("env", {}) if cfg.get("ok") else {}).get("JIRA_PAT_TOKEN", "")
-                    
-                    if not token:
-                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."} , 400)
+                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}, 400)
                     else:
                         self._send_json(jira_update_issue(
                             token,
@@ -242,6 +262,23 @@ class Handler(BaseHTTPRequestHandler):
                             fields=action.get("fields"),
                             transition=action.get("transition"),
                             comment=action.get("comment")
+                        ))
+            elif path == "/api/wizard-draft":
+                issue_key = body.get("issue_key", "").strip()
+                draft_type = body.get("draft_type", "").strip()
+                overrides = body.get("overrides", {})
+                env_in = body.get("env", {})
+                if not issue_key or not draft_type:
+                    self._send_json({"ok": False, "error": "issue_key와 draft_type이 필요합니다."}, 400)
+                else:
+                    token = _resolve_token(env_in)
+                    if not token:
+                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}, 400)
+                    else:
+                        self._send_json(api_wizard_draft(
+                            token, issue_key, draft_type, overrides,
+                            api_key=env_in.get("GEMINI_API_KEY"),
+                            model=env_in.get("GEMINI_MODEL"),
                         ))
             else:
                 self.send_response(404)
@@ -262,7 +299,7 @@ def main() -> None:
     is_docker = os.environ.get("IS_DOCKER", "").lower() in ("1", "true", "yes")
     host = "0.0.0.0" if is_docker else "localhost"
 
-    server = HTTPServer((host, PORT), Handler)
+    server = ThreadingHTTPServer((host, PORT), Handler)
     local_url = f"http://localhost:{PORT}"
 
     print(f"[sbe-jira-ui] 서버 시작")

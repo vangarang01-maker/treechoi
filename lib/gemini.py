@@ -6,12 +6,49 @@ import time
 import urllib.request
 
 from .settings import api_read
+from .prompts import load_prompt
 
 
-def api_gemini_chat(history: list, message: str, api_key: str = None, model: str = None) -> dict:
+def _call_gemini(api_key: str, model: str, prompt: str,
+                 temperature: float = 0.3, max_tokens: int = 1024,
+                 json_mode: bool = False) -> tuple[bool, str]:
+    """Gemini API 단일 호출 공통 헬퍼. (ok, text_or_error) 반환."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    gen_cfg: dict = {"temperature": temperature, "maxOutputTokens": max_tokens}
+    if json_mode:
+        gen_cfg["response_mime_type"] = "application/json"
+    payload = json.dumps({
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": gen_cfg,
+    }).encode("utf-8")
+    ctx = ssl.create_default_context()
+    try:
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        parts = (data.get("candidates", [{}])[0].get("content", {}).get("parts", []))
+        text = next((p.get("text", "") for p in parts if not p.get("thought")), "")
+        return True, text
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.loads(e.read().decode("utf-8", errors="replace"))
+            msg = err.get("error", {}).get("message", f"HTTP {e.code}")
+        except Exception:
+            msg = f"HTTP {e.code}"
+        return False, msg
+    except Exception as e:
+        return False, str(e)
+
+
+def api_gemini_chat(history: list, message: str, api_key: str = None, model: str = None,
+                    system_prompt: str = None) -> dict:
     """Gemini와 실시간 채팅 — 대화 히스토리 유지"""
     if not api_key or not model:
-        cfg = api_read()
+        cfg = api_read(mask_sensitive=False)
         if not cfg.get("ok"):
             return {"ok": False, "error": cfg.get("error", "설정 로드 실패")}
         env = cfg.get("env", {})
@@ -32,10 +69,13 @@ def api_gemini_chat(history: list, message: str, api_key: str = None, model: str
     contents.append({"role": "user", "parts": [{"text": message}]})
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    payload = json.dumps({
+    body: dict = {
         "contents": contents,
         "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048},
-    }).encode("utf-8")
+    }
+    if system_prompt:
+        body["system_instruction"] = {"parts": [{"text": system_prompt}]}
+    payload = json.dumps(body).encode("utf-8")
     ctx = ssl.create_default_context()
 
     t0 = time.time()
@@ -68,7 +108,7 @@ def api_gemini_chat(history: list, message: str, api_key: str = None, model: str
 def api_ai_verify(open_issue: dict, similar_issues: list, api_key: str = None, model: str = None) -> dict:
     """Gemini로 Top 3 완료 이슈 중 최적 1건 선택"""
     if not api_key or not model:
-        cfg = api_read()
+        cfg = api_read(mask_sensitive=False)
         if not cfg.get("ok"):
             return {"ok": False, "error": cfg.get("error")}
         env = cfg.get("env", {})
@@ -77,86 +117,53 @@ def api_ai_verify(open_issue: dict, similar_issues: list, api_key: str = None, m
     if not api_key:
         return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
 
-    lines = [
-        "당신은 Jira 이슈 분류 전문가입니다.\n\n",
-        "[현재 미해결 이슈]\n",
-        f"키: {open_issue['key']}  타입: {open_issue['issuetype']}\n",
-        f"제목: {open_issue['summary']}\n",
-        f"내용: {open_issue['description']}\n\n",
-        "[유사 완료 이슈 후보]\n",
-    ]
+    candidate_lines = []
     for i, iss in enumerate(similar_issues):
         label = ['①', '②', '③'][i] if i < 3 else f"({i+1})"
         blossom = f"결재요청: {iss['blossom']}\n" if iss.get('blossom') else ""
-        lines.append(
+        candidate_lines.append(
             f"{label} {iss['key']} — {iss['summary']}\n"
             f"내용: {iss['description']}\n"
-            f"{blossom}\n"
+            f"{blossom}"
         )
-    lines.append(
-        "위 후보 중 현재 미해결 이슈와 가장 유사하여 처리 참고가 될 이슈 1건을 선택하고, "
-        "이유를 2~3문장으로 설명해주세요.\n"
-        "반드시 아래 형식을 정확히 지켜서 응답하세요. 다른 형식은 허용되지 않습니다:\n"
-        "선택: {이슈키}\n"
-        "이유: {설명}\n\n"
-        "예시:\n"
-        "선택: SCM3-12345\n"
-        "이유: 두 이슈 모두 EP 화면 권한 요청이며 대상 시스템과 처리 방법이 동일합니다."
-    )
-    prompt = ''.join(lines)
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    payload = json.dumps({
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1024},
-    }).encode("utf-8")
-    ctx = ssl.create_default_context()
 
     try:
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        prompt = load_prompt(
+            "ai_verify",
+            open_key=open_issue['key'],
+            open_issuetype=open_issue['issuetype'],
+            open_summary=open_issue['summary'],
+            open_description=open_issue['description'],
+            candidates="\n".join(candidate_lines),
         )
-        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        parts = (data.get("candidates", [{}])[0]
-                 .get("content", {}).get("parts", []))
-        # thinking 모델은 parts[0]이 thought 내용 — thought=True가 아닌 첫 번째 part만 사용
-        reply = next((p.get("text", "") for p in parts if not p.get("thought")), "")
-
-        best_key = ""
-        reason = reply
-        # "선택: SCM3-XXXXX" 형식 파싱 (마크다운 볼드, 공백 변형 허용)
-        m = re.search(r'선택\s*[:：]\s*\*{0,2}([A-Z][A-Z0-9]*-\d+)\*{0,2}', reply)
-        if m:
-            best_key = m.group(1)
-        # 못 찾으면 "이유:" 이전 텍스트에서만 이슈 키 탐색 (이유 설명의 키와 혼동 방지)
-        if not best_key:
-            before_reason = re.split(r'이유\s*[:：]', reply)[0]
-            keys = re.findall(r'[A-Z][A-Z0-9]*-\d+', before_reason)
-            if keys:
-                best_key = keys[0]
-        m2 = re.search(r'이유\s*[:：]\s*(.+)', reply, re.DOTALL)
-        if m2:
-            reason = m2.group(1).strip()
-
-        return {"ok": True, "best_key": best_key, "reason": reason}
-    except urllib.error.HTTPError as e:
-        try:
-            err = json.loads(e.read().decode("utf-8", errors="replace"))
-            msg = err.get("error", {}).get("message", f"HTTP {e.code}")
-        except Exception:
-            msg = f"HTTP {e.code}"
-        return {"ok": False, "error": msg}
-    except Exception as e:
+    except FileNotFoundError as e:
         return {"ok": False, "error": str(e)}
+
+    ok, reply = _call_gemini(api_key, model, prompt, temperature=0.2, max_tokens=1024)
+    if not ok:
+        return {"ok": False, "error": reply}
+
+    best_key = ""
+    reason = reply
+    m = re.search(r'선택\s*[:：]\s*\*{0,2}([A-Z][A-Z0-9]*-\d+)\*{0,2}', reply)
+    if m:
+        best_key = m.group(1)
+    if not best_key:
+        before_reason = re.split(r'이유\s*[:：]', reply)[0]
+        keys = re.findall(r'[A-Z][A-Z0-9]*-\d+', before_reason)
+        if keys:
+            best_key = keys[0]
+    m2 = re.search(r'이유\s*[:：]\s*(.+)', reply, re.DOTALL)
+    if m2:
+        reason = m2.group(1).strip()
+
+    return {"ok": True, "best_key": best_key, "reason": reason}
 
 
 def api_draft_comment(open_issue: dict, best_match: dict, api_key: str = None, model: str = None) -> dict:
     """유사 완료 이슈를 참고하여 현재 이슈에 달 댓글 초안을 Gemini로 생성"""
     if not api_key or not model:
-        cfg = api_read()
+        cfg = api_read(mask_sensitive=False)
         if not cfg.get("ok"):
             return {"ok": False, "error": cfg.get("error")}
         env = cfg.get("env", {})
@@ -165,139 +172,293 @@ def api_draft_comment(open_issue: dict, best_match: dict, api_key: str = None, m
     if not api_key:
         return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
 
-    prompt = f"""당신은 IT 서비스 담당자의 업무 보조 AI입니다.
-아래 [현재 미해결 이슈]를 처리해야 합니다.
-과거에 유사하게 처리 완료된 [참고 완료 이슈]의 내용을 참고하여, 현재 이슈에 달 **처리 댓글 초안**을 작성해주세요.
-
-작성 규칙:
-1. 실제 Jira 댓글로 바로 등록할 수 있는 실무적이고 구체적인 문체로 작성
-2. 참고 이슈의 처리 방법/절차를 현재 이슈 맥락에 맞게 변환
-3. 불필요한 인사말이나 서론 없이 핵심 처리 내용만 작성
-4. 200자 내외로 간결하게 작성
-
-[현재 미해결 이슈]
-키: {open_issue['key']}  타입: {open_issue.get('issuetype', '')}
-제목: {open_issue['summary']}
-내용: {open_issue.get('description', '(내용 없음)')}
-{('결재요청: ' + open_issue['blossom']) if open_issue.get('blossom') else ''}
-
-[참고 완료 이슈]
-키: {best_match['key']}  타입: {best_match.get('issuetype', '')}
-제목: {best_match['summary']}
-내용: {best_match.get('description', '(내용 없음)')}
-{('결재요청: ' + best_match['blossom']) if best_match.get('blossom') else ''}
-
-댓글 초안:"""
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    payload = json.dumps({
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 512},
-    }).encode("utf-8")
-    ctx = ssl.create_default_context()
+    try:
+        prompt = load_prompt(
+            "draft_comment",
+            open_key=open_issue['key'],
+            open_issuetype=open_issue.get('issuetype', ''),
+            open_summary=open_issue['summary'],
+            open_description=open_issue.get('description', '(내용 없음)'),
+            open_blossom=f"결재요청: {open_issue['blossom']}" if open_issue.get('blossom') else "",
+            best_key=best_match['key'],
+            best_issuetype=best_match.get('issuetype', ''),
+            best_summary=best_match['summary'],
+            best_description=best_match.get('description', '(내용 없음)'),
+            best_blossom=f"결재요청: {best_match['blossom']}" if best_match.get('blossom') else "",
+        )
+    except FileNotFoundError as e:
+        return {"ok": False, "error": str(e)}
 
     t0 = time.time()
-    try:
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        latency = int((time.time() - t0) * 1000)
-        parts = (data.get("candidates", [{}])[0]
-                 .get("content", {}).get("parts", []))
-        reply = next((p.get("text", "") for p in parts if not p.get("thought")), "")
-        return {"ok": True, "draft": reply.strip(), "latency_ms": latency, "model": model}
-    except urllib.error.HTTPError as e:
-        try:
-            err = json.loads(e.read().decode("utf-8", errors="replace"))
-            msg = err.get("error", {}).get("message", f"HTTP {e.code}")
-        except Exception:
-            msg = f"HTTP {e.code}"
-        return {"ok": False, "error": msg}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    ok, reply = _call_gemini(api_key, model, prompt, temperature=0.4, max_tokens=512)
+    latency = int((time.time() - t0) * 1000)
+    if not ok:
+        return {"ok": False, "error": reply}
+    return {"ok": True, "draft": reply.strip(), "latency_ms": latency, "model": model}
 
 
 def api_gemini_process_agent(message: str, api_key: str = None, model: str = None) -> dict:
     """사용자 메시지를 분석하여 의도(검색, 채팅, 액션) 및 상세 파라미터 추출"""
     if not api_key or not model:
-        cfg = api_read()
+        cfg = api_read(mask_sensitive=False)
         if not cfg.get("ok"):
             return {"ok": False, "error": cfg.get("error")}
         env = cfg.get("env", {})
         api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
         model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
-    
     if not api_key:
         return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
 
-    prompt = f"""당신은 Jira 업무 보조 AI 에이전트입니다. 사용자의 자연어 입력을 분석하여 의도와 필요한 파라미터를 JSON 형식으로 응답하세요.
-
-의도 종류:
-1. SEARCH: Jira 이슈 검색 (JQL 생성 필요)
-2. ACTION: Jira 이슈 수정 (상태 변경, 담당자 변경, 댓글 추가 등)
-3. CHAT: 단순 대화 또는 도움말 요청
-
-필드 가이드 (JQL 생성 시):
-- 프로젝트: SCM3
-- 상태: "미해결", "Open", "진행중", "완료", "반려", "중단" 등
-- 이슈타입: "서비스요청관리", "변경관리" 등
-- 담당자: assignee = currentUser() 또는 특정 이름/사번(예: 223733)
-
-응답 JSON 형식:
-{{
-  "intent": "SEARCH" | "ACTION" | "CHAT",
-  "jql": "생성된 JQL (SEARCH인 경우)",
-  "action": {{
-    "issue_key": "이슈 키 (예: SCM3-1234)",
-    "fields": {{ "assignee": "사번" }},
-    "transition": "상태명 (예: 진행중)",
-    "comment": "추가할 댓글 내용"
-  }},
-  "reason": "분석 이유"
-}}
-
-사용자 입력: {message}
-
-JSON 응답:"""
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    payload = json.dumps({
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 1024,
-            "response_mime_type": "application/json"
-        },
-    }).encode("utf-8")
-    ctx = ssl.create_default_context()
-
     try:
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        
-        parts = (data.get("candidates", [{}])[0]
-                 .get("content", {}).get("parts", []))
-        raw_reply = next((p.get("text", "") for p in parts if not p.get("thought")), "")
-        
+        prompt = load_prompt("agent_query", message=message)
+    except FileNotFoundError as e:
+        return {"ok": False, "error": str(e)}
+
+    ok, raw_reply = _call_gemini(api_key, model, prompt,
+                                  temperature=0.1, max_tokens=1024, json_mode=True)
+    if not ok:
+        return {"ok": False, "error": raw_reply}
+    try:
         result = json.loads(raw_reply)
         return {"ok": True, "result": result}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 
+def api_gemini_requirements(
+    summary: str, description: str, change_type: str,
+    api_key: str = None, model: str = None,
+) -> dict:
+    """description → 요건정의서 테이블 (Jira 위키 마크업) 생성"""
+    if not api_key or not model:
+        cfg = api_read(mask_sensitive=False)
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+
+    is_db = "DB" in change_type.upper()
+    row_type = "DB 데이터 변경" if is_db else "기능 수정"
+
+    try:
+        prompt = load_prompt(
+            "requirements",
+            row_type=row_type,
+            summary=summary,
+            change_type=change_type,
+            description=description or "(내용 없음)",
+        )
+    except FileNotFoundError as e:
+        return {"ok": False, "error": str(e)}
+
+    ok, reply = _call_gemini(api_key, model, prompt, temperature=0.3, max_tokens=1024)
+    if not ok:
+        return {"ok": False, "error": reply}
+    reply = re.sub(r"```[^\n]*\n?", "", reply).strip()
+    if not reply or "||번호||" not in reply:
+        return {"ok": False, "error": "응답 형식 불일치"}
+    return {"ok": True, "content": reply}
+
+
+def api_gemini_review(
+    summary: str, description: str, change_type: str,
+    api_key: str = None, model: str = None,
+) -> dict:
+    """변경검토회의 5섹션 초안 (Jira 위키 마크업) 생성"""
+    if not api_key or not model:
+        cfg = api_read(mask_sensitive=False)
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+
+    from datetime import date
+    today = date.today().strftime("%Y-%m-%d")
+
+    try:
+        prompt = load_prompt(
+            "review",
+            today=today,
+            summary=summary,
+            change_type=change_type,
+            description=description or "(내용 없음)",
+        )
+    except FileNotFoundError as e:
+        return {"ok": False, "error": str(e)}
+
+    ok, reply = _call_gemini(api_key, model, prompt, temperature=0.3, max_tokens=1024)
+    if not ok:
+        return {"ok": False, "error": reply}
+    reply = re.sub(r"```[^\n]*\n?", "", reply).strip()
+    if not reply or "|회의일시|" not in reply:
+        return {"ok": False, "error": "응답 형식 불일치"}
+    return {"ok": True, "content": reply}
+
+
+def api_gemini_test(
+    summary: str, review_content: str, change_type: str,
+    api_key: str = None, model: str = None,
+) -> dict:
+    """변경검토회의 내용 기반 테스트케이스 생성 (Jira 위키 마크업)"""
+    if not api_key or not model:
+        cfg = api_read(mask_sensitive=False)
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+
+    from datetime import date
+    today = date.today().strftime("%Y/%m/%d")
+    is_db = "DB" in change_type.upper()
+    db_note = "DB 데이터 변경 시나리오로 작성" if is_db else "UI/기능 테스트 시나리오로 작성"
+
+    try:
+        prompt = load_prompt(
+            "test",
+            today=today,
+            db_note=db_note,
+            summary=summary,
+            change_type=change_type,
+            review_content=review_content or "(내용 없음)",
+        )
+    except FileNotFoundError as e:
+        return {"ok": False, "error": str(e)}
+
+    ok, reply = _call_gemini(api_key, model, prompt, temperature=0.3, max_tokens=2048)
+    if not ok:
+        return {"ok": False, "error": reply}
+    reply = re.sub(r"```[^\n]*\n?", "", reply).strip()
+    if not reply or "테스트유형" not in reply:
+        return {"ok": False, "error": "응답 형식 불일치"}
+    return {"ok": True, "content": reply}
+
+
+def api_gemini_procedure(
+    summary: str, change_type: str, server_info: str,
+    api_key: str = None, model: str = None,
+) -> dict:
+    """배포절차 초안 생성 (Jira 위키 마크업)"""
+    if not api_key or not model:
+        cfg = api_read(mask_sensitive=False)
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+
+    is_db = "DB" in change_type.upper()
+    prompt_name = "procedure_db" if is_db else "procedure_program"
+
+    try:
+        prompt = load_prompt(
+            prompt_name,
+            summary=summary,
+            change_type=change_type,
+            server_info=server_info,
+        )
+    except FileNotFoundError as e:
+        return {"ok": False, "error": str(e)}
+
+    ok, reply = _call_gemini(api_key, model, prompt, temperature=0.3, max_tokens=1024)
+    if not ok:
+        return {"ok": False, "error": reply}
+    reply = re.sub(r"```[^\n]*\n?", "", reply).strip()
+    if not reply or "변경 내용" not in reply:
+        return {"ok": False, "error": "응답 형식 불일치"}
+    return {"ok": True, "content": reply}
+
+
+def api_gemini_approval(
+    summary: str, description: str, change_type: str,
+    api_key: str = None, model: str = None,
+) -> dict:
+    """배포결재 멘트 생성 (자유 텍스트)"""
+    if not api_key or not model:
+        cfg = api_read(mask_sensitive=False)
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+
+    try:
+        prompt = load_prompt(
+            "approval",
+            summary=summary,
+            change_type=change_type,
+            description=description or "(내용 없음)",
+        )
+    except FileNotFoundError as e:
+        return {"ok": False, "error": str(e)}
+
+    ok, reply = _call_gemini(api_key, model, prompt, temperature=0.4, max_tokens=512)
+    if not ok:
+        return {"ok": False, "error": reply}
+    reply = re.sub(r"```[^\n]*\n?", "", reply).strip()
+    if not reply:
+        return {"ok": False, "error": "빈 응답"}
+    return {"ok": True, "content": reply}
+
+
+_SR_WORK_TYPE_PROMPT = {
+    "계정/권한 처리": "sr_account",
+    "데이터추출":     "sr_data",
+    "공통코드 단순변경": "sr_code",
+    "기타":           "sr_etc",
+}
+
+
+def api_gemini_sr_draft(
+    work_type: str, summary: str, description: str,
+    api_key: str = None, model: str = None,
+) -> dict:
+    """서비스요청관리 업무유형별 처리 내역 초안 생성"""
+    if not api_key or not model:
+        cfg = api_read(mask_sensitive=False)
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+
+    prompt_name = _SR_WORK_TYPE_PROMPT.get(work_type, "sr_etc")
+    try:
+        prompt = load_prompt(
+            prompt_name,
+            summary=summary,
+            description=description or "(내용 없음)",
+        )
+    except FileNotFoundError as e:
+        return {"ok": False, "error": str(e)}
+
+    ok, reply = _call_gemini(api_key, model, prompt, temperature=0.3, max_tokens=1024)
+    if not ok:
+        return {"ok": False, "error": reply}
+    reply = re.sub(r"```[^\n]*\n?", "", reply).strip()
+    if not reply:
+        return {"ok": False, "error": "빈 응답"}
+    return {"ok": True, "content": reply}
+
+
 def api_gemini_check(api_key: str = None, model: str = None) -> dict:
     """Gemini API 상태 확인 (countTokens로 ping)"""
     if not api_key or not model:
-        cfg = api_read()
+        cfg = api_read(mask_sensitive=False)
         if not cfg.get("ok"):
             return {"ok": False, "status": "config_error", "message": cfg.get("error")}
         env = cfg.get("env", {})

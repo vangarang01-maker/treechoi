@@ -53,9 +53,24 @@ JIRA_USERNAME= (관리자 사번)
 |------|-------|------|
 | **최초 구축** | `docker compose up --build -d` | 이미지 빌드 후 백그라운드 실행 |
 | **서비스 중지** | `docker compose down` | 컨테이너 제거 (데이터는 보존됨) |
-| **재시작** | `docker compose restart` | 컨테이너 재시작 |
+| **재시작** | `docker compose restart` | 컨테이너 재시작 (프로세스 재로드) |
 | **로그 모니터링** | `docker compose logs -f` | 실시간 오류 및 접속 로그 확인 |
 | **코드 업데이트** | `git pull` 후 `docker compose up --build -d` | 최신 소스 반영 및 재빌드 |
+
+### 4-1. 변경 유형별 반영 방법
+
+`lib/`, `ui/`, `prompts/` 는 `docker-compose.yml`에 볼륨 마운트되어 있어 파일 수정이 컨테이너에 즉시 반영됩니다. 단, **Python 서버 프로세스는 모듈을 시작 시점에 메모리에 올려두기 때문에** 파일이 바뀌어도 실행 중인 서버에는 자동으로 적용되지 않습니다.
+
+| 변경 내용 | 반영 방법 |
+|----------|---------|
+| `lib/*.py` 코드 수정 | `docker compose restart` — 프로세스 재시작으로 모듈 재로드 |
+| `ui/` (HTML/JS/CSS) 수정 | 브라우저 새로고침만으로 즉시 반영 |
+| `prompts/*.txt` 수정 | 브라우저 새로고침만으로 즉시 반영 (요청마다 파일 읽음) |
+| `.env` 환경변수 변경 | `docker compose up -d` — 컨테이너 재생성 필요 (`restart`로는 env 변경 미반영) |
+| `Dockerfile` / `docker-compose.yml` 변경 | `docker compose up --build -d` — 이미지 재빌드 필요 |
+
+> [!IMPORTANT]
+> `.env`를 수정한 뒤 `docker compose restart`만 하면 환경변수가 반영되지 않습니다. 반드시 `docker compose up -d`로 컨테이너를 재생성하세요.
 
 ---
 

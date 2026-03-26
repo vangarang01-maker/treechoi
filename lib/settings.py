@@ -7,7 +7,14 @@ CLAUDE_JSON = Path.home() / ".claude.json"
 MCP_NAME = "sbe-jira-mcp"
 
 # Docker 환경변수 키 목록
-_ENV_KEYS = ["GEMINI_API_KEY", "GEMINI_MODEL", "JIRA_PAT_TOKEN", "JIRA_USERNAME"]
+_ENV_KEYS = [
+    "AI_PROVIDER",
+    "GEMINI_API_KEY", "GEMINI_MODEL",
+    "DEVX_API_KEY",
+    "DEVX_AGENT_REQUIREMENTS", "DEVX_AGENT_REVIEW", "DEVX_AGENT_TEST",
+    "DEVX_AGENT_PROCEDURE", "DEVX_AGENT_SAFE_QUERY", "DEVX_AGENT_APPROVAL", "DEVX_AGENT_SR", "DEVX_AGENT_CHAT",
+    "JIRA_PAT_TOKEN", "JIRA_USERNAME",
+]
 
 
 def _is_docker_env() -> bool:
@@ -15,6 +22,11 @@ def _is_docker_env() -> bool:
     return any(os.environ.get(k) for k in _ENV_KEYS)
 
 ENV_FIELDS = [
+    {"key": "AI_PROVIDER", "label": "AI 제공자", "sensitive": False, "type": "provider_toggle",
+     "options": [
+         {"value": "gemini", "label": "Gemini"},
+         {"value": "devx",   "label": "DevX AI"},
+     ]},
     {"key": "JIRA_PAT_TOKEN", "label": "Jira PAT Token",    "sensitive": True,  "placeholder": "Personal Access Token",
      "docker_placeholder": "내 Jira PAT 입력 (Jira 프로필 → 개인 액세스 토큰 메뉴에서 발급)"},
     {"key": "JIRA_USERNAME",  "label": "Jira 사용자명(사번)", "sensitive": False, "placeholder": "223733",
@@ -27,6 +39,8 @@ ENV_FIELDS = [
          {"value": "gemini-2.5-flash-lite",  "label": "gemini-2.5-flash-lite"},
          {"value": "gemini-3-flash-preview", "label": "gemini-3-flash-preview"},
      ]},
+    {"key": "DEVX_API_KEY",   "label": "DevX AI API Key",   "sensitive": True,  "placeholder": "DKx5VXoZ...",
+     "docker_placeholder": "DevX AI API 키 입력 (devx config 또는 팀 공유 키)"},
 ]
 
 
@@ -45,7 +59,7 @@ def _find_project_key(data: dict) -> str | None:
     return None
 
 
-_SENSITIVE_KEYS = {"GEMINI_API_KEY", "JIRA_PAT_TOKEN", "JIRA_USERNAME"}
+_SENSITIVE_KEYS = {"GEMINI_API_KEY", "DEVX_API_KEY", "JIRA_PAT_TOKEN", "JIRA_USERNAME"}
 
 
 def _docker_env_raw() -> dict:

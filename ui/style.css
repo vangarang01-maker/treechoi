@@ -565,8 +565,10 @@ body {
 }
 .similar-search-row {
   padding: 12px 16px; border-bottom: 1px solid var(--border);
+  display: flex; gap: 8px;
 }
-.similar-search-row .btn { width: 100%; }
+.similar-search-row #similar-search-btn { flex: 1; }
+.similar-search-row .btn-secondary { flex: none; }
 .similar-results {
   flex: 1;
   min-height: 0;
@@ -974,6 +976,23 @@ body {
   flex-direction: column;
   gap: 8px;
 }
+.safe-query-split {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.safe-query-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.safe-query-textarea {
+  flex: 1;
+  min-height: 260px;
+  resize: vertical;
+}
 .wizard-textarea {
   width: 100%;
   box-sizing: border-box;
@@ -1036,3 +1055,22 @@ body {
 [data-theme="light"] .input-wrap input.has-value { border-color: #b0b8e0; }
 [data-theme="light"] .spinner { border-color: rgba(0,0,0,.15); border-top-color: #fff; }
 [data-theme="light"] .bubble-user { background: var(--accent); color: #fff; }
+
+/* AI 제공자 토글 */
+.provider-toggle-wrap {
+  display: flex; gap: 8px; margin: 12px 0 8px;
+}
+.provider-btn {
+  flex: 1; padding: 8px 0; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text-muted); font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all .15s;
+}
+.provider-btn:hover { border-color: var(--accent); color: var(--accent); }
+.provider-btn.active {
+  background: var(--accent); border-color: var(--accent);
+  color: #fff; font-weight: 600;
+}
+.provider-desc {
+  font-size: 12px; color: var(--text-muted); margin-bottom: 4px;
+}

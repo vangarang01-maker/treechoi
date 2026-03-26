@@ -9,6 +9,7 @@ config_ui.py — sbe-jira-mcp 설정 관리 웹 UI
 
 import json
 import os
+import webbrowser
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -16,6 +17,7 @@ from urllib.parse import urlparse, parse_qs
 from lib.settings import api_read, api_write, ENV_FIELDS, _is_docker_env
 from lib.jira import api_chat, SHORTCUTS, jira_get_issue_detail, jira_update_issue, jira_get_transitions, api_jira_check
 from lib.gemini import api_gemini_chat, api_gemini_check, api_ai_verify, api_draft_comment, api_gemini_process_agent
+from lib.ai_router import api_ai_check, get_provider
 from lib.embedding import api_embedding_cache_status, api_embedding_build, api_embedding_build_stream, api_similar_issues
 from lib.wizard import api_wizard_detect, api_wizard_draft
 from lib.prompts import load_prompt, PROMPTS_DIR
@@ -59,8 +61,14 @@ def build_html() -> bytes:
 # ── HTTP 서버 ─────────────────────────────────────────────────────────────────
 
 _STATIC = {
-    "/style.css": ("text/css", "style.css"),
-    "/script.js": ("application/javascript", "script.js"),
+    "/style.css":    ("text/css",               "style.css"),
+    "/utils.js":     ("application/javascript",  "utils.js"),
+    "/settings.js":  ("application/javascript",  "settings.js"),
+    "/jira.js":      ("application/javascript",  "jira.js"),
+    "/helpdesk.js":  ("application/javascript",  "helpdesk.js"),
+    "/similar.js":   ("application/javascript",  "similar.js"),
+    "/wizard.js":    ("application/javascript",  "wizard.js"),
+    "/script.js":    ("application/javascript",  "script.js"),
 }
 
 
@@ -89,6 +97,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(api_read())
         elif path == "/api/gemini-check":
             self._send_json(api_gemini_check())
+        elif path == "/api/ai-check":
+            self._send_json({**api_ai_check(), "provider": get_provider()})
         elif path == "/api/embedding-cache-status":
             self._send_json(api_embedding_cache_status())
         elif path == "/api/embedding-build-stream":
@@ -147,6 +157,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(api_gemini_check(
                     model=env_in.get("GEMINI_MODEL")
                 ))
+            elif path == "/api/ai-check":
+                env_in = body.get("env", {})
+                provider = env_in.get("AI_PROVIDER") or get_provider()
+                if provider == "devx":
+                    from lib.devx_ai import api_devx_check
+                    result = api_devx_check(api_key=env_in.get("DEVX_API_KEY") or None)
+                else:
+                    result = api_gemini_check(model=env_in.get("GEMINI_MODEL"))
+                self._send_json({**result, "provider": provider})
             elif path == "/api/jira-check":
                 env_in = body.get("env", {})
                 self._send_json(api_jira_check(token=_resolve_token(env_in)))
@@ -163,6 +182,26 @@ class Handler(BaseHTTPRequestHandler):
                 env_in = body.get("env", {})
                 if not message:
                     self._send_json({"error": "message가 비어있습니다."}, 400)
+                else:
+                    self._send_json(api_gemini_chat(
+                        history, message,
+                        api_key=env_in.get("GEMINI_API_KEY"),
+                        model=env_in.get("GEMINI_MODEL"),
+                        system_prompt=_get_helpdesk_system_prompt(),
+                    ))
+            elif path == "/api/helpdesk-chat":
+                message = body.get("message", "").strip()
+                history = body.get("history", [])
+                env_in = body.get("env", {})
+                provider = env_in.get("AI_PROVIDER") or get_provider()
+                if not message:
+                    self._send_json({"error": "message가 비어있습니다."}, 400)
+                elif provider == "devx":
+                    from lib.devx_ai import api_devx_chat
+                    self._send_json(api_devx_chat(
+                        history, message,
+                        api_key=env_in.get("DEVX_API_KEY") or None,
+                    ))
                 else:
                     self._send_json(api_gemini_chat(
                         history, message,
@@ -275,10 +314,17 @@ class Handler(BaseHTTPRequestHandler):
                     if not token:
                         self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}, 400)
                     else:
+                        provider = get_provider()
+                        if provider == "devx":
+                            _api_key = env_in.get("DEVX_API_KEY") or None
+                            _model = None
+                        else:
+                            _api_key = env_in.get("GEMINI_API_KEY") or None
+                            _model = env_in.get("GEMINI_MODEL") or None
                         self._send_json(api_wizard_draft(
                             token, issue_key, draft_type, overrides,
-                            api_key=env_in.get("GEMINI_API_KEY"),
-                            model=env_in.get("GEMINI_MODEL"),
+                            api_key=_api_key,
+                            model=_model,
                         ))
             else:
                 self.send_response(404)

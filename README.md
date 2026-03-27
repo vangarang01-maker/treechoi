@@ -108,11 +108,28 @@ project = SCM3 AND assignee = currentUser() AND status != 완료 ORDER BY update
 미해결 이슈와 비슷한 **과거 완료 이슈 Top 3**를 찾아줍니다.
 검색 결과는 새로고침 후에도 유지됩니다 (🗑 초기화 버튼으로 지우기 가능).
 
-### 동작 원리
+### 동작 원리 (Two-stage RAG)
 
-```
-[캐시 구축]  지정 사용자들의 완료 이슈 → Gemini Embedding → SQLite 저장
-[유사 검색]  미해결 이슈 → 임베딩 → 완료 이슈 벡터와 코사인 유사도 계산 → Top 3
+```mermaid
+flowchart TD
+    subgraph Stage1["🗄️ Stage 1 — 오프라인 인덱싱 (캐시 구축)"]
+        A["👤 사용자 지정\n(최대 3명)"] --> B["Jira API\n완료 이슈 조회 (최대 100건)"]
+        B --> C["이슈 전처리\nsummary + description[:300]"]
+        C --> D["Gemini Embedding API\ngemini-embedding-001"]
+        D --> E[("SQLite\nembedding_cache.db\n유형별 분리 저장")]
+    end
+
+    subgraph Stage2["🔍 Stage 2 — 온라인 검색 (실시간)"]
+        F["Jira API\n미해결 이슈 조회"] --> G["이슈 전처리\n동일 구조"]
+        G --> H["Gemini Embedding API\nquery vector 생성"]
+        E -->|"캐시 벡터 로드\n(같은 issuetype만)"| I["코사인 유사도 계산"]
+        H --> I
+        I --> J["🏆 Top 3 유사 이슈"]
+    end
+
+    J --> K{"인라인 액션"}
+    K -->|"🤖 AI검증"| L["Gemini\n최적 매칭 1건 + 이유 설명"]
+    K -->|"✍ 처리 초안"| M["AI 초안 생성\n→ Jira 댓글 등록"]
 ```
 
 - 이슈 타입별 비교 (서비스요청관리 ↔ 서비스요청관리, 변경관리 ↔ 변경관리)

@@ -20,6 +20,7 @@ from lib.gemini import api_gemini_chat, api_gemini_check, api_ai_verify, api_dra
 from lib.ai_router import api_ai_check, get_provider
 from lib.embedding import api_embedding_cache_status, api_embedding_build, api_embedding_build_stream, api_similar_issues
 from lib.wizard import api_wizard_detect, api_wizard_draft
+from lib.weekly_report import api_weekly_fetch, api_weekly_generate
 from lib.prompts import load_prompt, PROMPTS_DIR
 
 PORT = 8765
@@ -68,6 +69,7 @@ _STATIC = {
     "/helpdesk.js":  ("application/javascript",  "helpdesk.js"),
     "/similar.js":   ("application/javascript",  "similar.js"),
     "/wizard.js":    ("application/javascript",  "wizard.js"),
+    "/weekly.js":    ("application/javascript",  "weekly.js"),
     "/script.js":    ("application/javascript",  "script.js"),
 }
 
@@ -302,6 +304,39 @@ class Handler(BaseHTTPRequestHandler):
                             transition=action.get("transition"),
                             comment=action.get("comment")
                         ))
+            elif path == "/api/weekly-issues":
+                date_from = body.get("date_from", "").strip()
+                date_to   = body.get("date_to", "").strip()
+                env_in    = body.get("env", {})
+                if not date_from or not date_to:
+                    self._send_json({"ok": False, "error": "date_from, date_to가 필요합니다."}, 400)
+                else:
+                    token = _resolve_token(env_in)
+                    if not token:
+                        self._send_json({"ok": False, "error": "JIRA_PAT_TOKEN이 설정되지 않았습니다."}, 400)
+                    else:
+                        self._send_json(api_weekly_fetch(token, date_from, date_to))
+            elif path == "/api/weekly-generate":
+                issues    = body.get("issues", [])
+                overrides = body.get("overrides", {})
+                status_map = body.get("status_map", {})
+                date_from = body.get("date_from", "").strip()
+                date_to   = body.get("date_to", "").strip()
+                env_in    = body.get("env", {})
+                if not issues:
+                    self._send_json({"ok": False, "error": "issues가 비어있습니다."}, 400)
+                else:
+                    provider = get_provider()
+                    if provider == "devx":
+                        _api_key = env_in.get("DEVX_API_KEY") or None
+                        _model   = None
+                    else:
+                        _api_key = env_in.get("GEMINI_API_KEY") or None
+                        _model   = env_in.get("GEMINI_MODEL") or None
+                    self._send_json(api_weekly_generate(
+                        issues, overrides, status_map, date_from, date_to,
+                        api_key=_api_key, model=_model, provider=provider,
+                    ))
             elif path == "/api/wizard-draft":
                 issue_key = body.get("issue_key", "").strip()
                 draft_type = body.get("draft_type", "").strip()

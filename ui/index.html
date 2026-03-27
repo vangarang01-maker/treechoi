@@ -27,6 +27,7 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
       <button class="nav-item" data-page="chat" onclick="switchPage('chat', this)">💬 Jira 테스트</button>
       <button class="nav-item" data-page="similar" onclick="switchPage('similar', this)">🔍 유사 이슈 검색</button>
       <button class="nav-item" data-page="wizard" onclick="switchPage('wizard', this)">🪄 처리 마법사</button>
+      <button class="nav-item" data-page="weekly" onclick="switchPage('weekly', this)">📊 주간보고</button>
     </div>
     <div class="sidebar-footer">
       <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="테마 전환">🌙 다크</button>
@@ -312,6 +313,90 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
       </div>
     </div>
 
+    <!-- 주간보고 페이지 -->
+    <div id="page-weekly" class="page">
+      <div class="weekly-panel">
+
+        <!-- 기간 설정 -->
+        <div class="weekly-header-row">
+          <input type="date" id="weekly-from" class="weekly-date-input">
+          <span class="weekly-date-sep">~</span>
+          <input type="date" id="weekly-to" class="weekly-date-input">
+          <button class="btn btn-primary" id="weekly-fetch-btn" onclick="weeklyFetch()">📋 이슈 조회</button>
+        </div>
+
+        <!-- 상태 매핑 설정 (접기/펼치기) -->
+        <div class="collapsible-header" onclick="toggleWeeklyMapping()">
+          <span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px">상태 매핑</span>
+          <div class="collapsible-toggle">
+            <span>⚙ 상태 → 그룹 설정</span>
+            <span id="weekly-mapping-arrow" class="toggle-arrow">▶</span>
+          </div>
+        </div>
+        <div class="collapsible-body" id="weekly-mapping-body" style="display:none">
+          <div class="collapsible-inner">
+            <div class="weekly-mapping-groups">
+              <div class="weekly-mapping-group-item">
+                <div class="weekly-mapping-group-label weekly-group-검토중">검토중</div>
+                <div class="user-tags" id="mapping-tags-검토중"></div>
+                <div class="user-add-row">
+                  <input id="mapping-input-검토중" class="user-add-input" type="text" placeholder="상태명 입력 후 Enter" autocomplete="off"
+                    onkeydown="if(event.key==='Enter') weeklyAddMappingStatus('검토중')">
+                  <button class="btn-check" onclick="weeklyAddMappingStatus('검토중')">+ 추가</button>
+                </div>
+              </div>
+              <div class="weekly-mapping-group-item">
+                <div class="weekly-mapping-group-label weekly-group-진행중">진행중</div>
+                <div class="user-tags" id="mapping-tags-진행중"></div>
+                <div class="user-add-row">
+                  <input id="mapping-input-진행중" class="user-add-input" type="text" placeholder="상태명 입력 후 Enter" autocomplete="off"
+                    onkeydown="if(event.key==='Enter') weeklyAddMappingStatus('진행중')">
+                  <button class="btn-check" onclick="weeklyAddMappingStatus('진행중')">+ 추가</button>
+                </div>
+              </div>
+              <div class="weekly-mapping-group-item">
+                <div class="weekly-mapping-group-label weekly-group-완료">완료</div>
+                <div class="user-tags" id="mapping-tags-완료"></div>
+                <div class="user-add-row">
+                  <input id="mapping-input-완료" class="user-add-input" type="text" placeholder="상태명 입력 후 Enter" autocomplete="off"
+                    onkeydown="if(event.key==='Enter') weeklyAddMappingStatus('완료')">
+                  <button class="btn-check" onclick="weeklyAddMappingStatus('완료')">+ 추가</button>
+                </div>
+              </div>
+            </div>
+            <div class="collapsible-actions">
+              <button class="btn btn-secondary" onclick="weeklyResetMapping()">↩ 기본값으로 초기화</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 이슈 목록 -->
+        <div id="weekly-issues-area" style="display:none">
+          <div class="weekly-issues-header">
+            <span id="weekly-issues-count" style="font-size:13px;color:var(--text-muted)">0건</span>
+            <button class="btn btn-primary" id="weekly-generate-btn" onclick="weeklyGenerate()">🤖 주간보고 생성</button>
+          </div>
+          <div id="weekly-issues-list" class="weekly-issues-list"></div>
+        </div>
+
+        <!-- 생성 결과 -->
+        <div id="weekly-result-area" style="display:none">
+          <div class="weekly-result-header">
+            <span style="font-size:13px;font-weight:600">📝 주간보고 초안</span>
+            <button class="btn btn-secondary" onclick="weeklyCopy()">📋 복사</button>
+          </div>
+          <textarea id="weekly-result-text" class="wizard-textarea weekly-result-textarea" spellcheck="false"></textarea>
+        </div>
+
+        <!-- 빈 상태 -->
+        <div class="empty-hint" id="weekly-empty-hint">
+          <div class="big">📊</div>
+          <div>기간을 설정하고 이슈를 조회하세요</div>
+        </div>
+
+      </div>
+    </div>
+
   </main>
 </div>
 <div id="toast"></div>
@@ -321,6 +406,7 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
 <script src="/helpdesk.js"></script>
 <script src="/similar.js"></script>
 <script src="/wizard.js"></script>
+<script src="/weekly.js"></script>
 <script src="/script.js"></script>
 </body>
 </html>

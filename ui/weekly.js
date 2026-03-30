@@ -48,8 +48,8 @@ function _saveWeeklyStatusMap() {
 function toggleWeeklyMapping() {
   const body  = document.getElementById('weekly-mapping-body');
   const arrow = document.getElementById('weekly-mapping-arrow');
-  const isOpen = body.style.display !== 'none';
-  body.style.display = isOpen ? 'none' : '';
+  const isOpen = body.style.display !== 'none' && body.style.display !== '';
+  body.style.display = isOpen ? 'none' : 'block';
   arrow.textContent = isOpen ? '▶' : '▼';
 }
 
@@ -92,6 +92,14 @@ function weeklyResetMapping() {
   _saveWeeklyStatusMap();
   renderWeeklyMapping();
   showToast('기본값으로 초기화했습니다.', 'success');
+}
+
+function toggleWeeklyIssues() {
+  const body  = document.getElementById('weekly-issues-body');
+  const arrow = document.getElementById('weekly-issues-arrow');
+  const isOpen = body.classList.contains('open');
+  body.classList.toggle('open');
+  arrow.textContent = isOpen ? '▶' : '▼';
 }
 
 function _weeklyGetGroup(statusName) {
@@ -148,7 +156,11 @@ function _renderWeeklyIssues() {
     return;
   }
 
-  document.getElementById('weekly-issues-count').textContent = `${weeklyIssues.length}건`;
+  document.getElementById('weekly-issues-count').textContent = `조회된 이슈 ${weeklyIssues.length}건`;
+  // 이슈 목록 펼쳐두기
+  const body = document.getElementById('weekly-issues-body');
+  const arrow = document.getElementById('weekly-issues-arrow');
+  if (body) { body.classList.add('open'); arrow.textContent = '▼'; }
   const list = document.getElementById('weekly-issues-list');
   list.innerHTML = '';
 

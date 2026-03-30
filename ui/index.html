@@ -25,7 +25,7 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
       <div class="nav-section-label">기능</div>
       <button class="nav-item" data-page="gemini" onclick="switchPage('gemini', this)">🏠 안내데스크</button>
       <button class="nav-item" data-page="chat" onclick="switchPage('chat', this)">💬 Jira 테스트</button>
-      <button class="nav-item" data-page="similar" onclick="switchPage('similar', this)">🔍 유사 이슈 검색</button>
+      <button class="nav-item" data-page="similar" onclick="switchPage('similar', this)">🔍 참고 이슈 검색</button>
       <button class="nav-item" data-page="wizard" onclick="switchPage('wizard', this)">🪄 처리 마법사</button>
       <button class="nav-item" data-page="weekly" onclick="switchPage('weekly', this)">📊 주간보고</button>
     </div>
@@ -191,17 +191,18 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
     <!-- 유사 이슈 페이지 -->
     <div id="page-similar" class="page">
       <div class="similar-panel">
+        <!-- 캐시 구축 섹션 -->
         <div class="collapsible-header" onclick="toggleSimilarSettings()">
-          <span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;">검색 설정</span>
+          <span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;">캐시 구축</span>
           <div class="collapsible-toggle">
-            <span>⚙ 대상 사용자</span>
+            <span id="cache-status">캐시 상태 확인 중...</span>
             <span id="similar-settings-arrow" class="toggle-arrow">▶</span>
           </div>
         </div>
         <div class="collapsible-body" id="similar-settings-body">
           <div class="collapsible-inner">
             <div class="user-tag-area">
-              <div class="user-tag-label">캐시 구축 대상 사용자 (최대 3명)</div>
+              <div class="user-tag-label">캐시 구축 대상 사용자</div>
               <div class="user-tags" id="user-tags"></div>
               <div class="user-add-row">
                 <input id="user-add-input" class="user-add-input" type="text" placeholder="사번 입력 후 Enter" autocomplete="off">
@@ -223,8 +224,17 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
             </div>
           </div>
         </div>
+
+        <!-- 검색 범위 섹션 -->
+        <div class="similar-scope-section">
+          <div class="similar-scope-label">검색 범위</div>
+          <div id="similar-scope-checkboxes" class="similar-scope-checkboxes">
+            <span class="similar-scope-empty">캐시를 구축하면 여기에 사용자가 표시됩니다</span>
+          </div>
+        </div>
+
         <div class="similar-search-row">
-          <button class="btn btn-primary" id="similar-search-btn" onclick="searchSimilar()">🔍 유사 이슈 검색</button>
+          <button class="btn btn-primary" id="similar-search-btn" onclick="searchSimilar()">🔍 참고 이슈 검색</button>
           <button class="btn btn-secondary" onclick="clearSimilarResults()" title="검색 결과 초기화">🗑 초기화</button>
         </div>
         <div class="similar-results" id="similar-results">
@@ -333,7 +343,7 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
             <span id="weekly-mapping-arrow" class="toggle-arrow">▶</span>
           </div>
         </div>
-        <div class="collapsible-body" id="weekly-mapping-body" style="display:none">
+        <div class="weekly-mapping-collapse" id="weekly-mapping-body" style="display:none">
           <div class="collapsible-inner">
             <div class="weekly-mapping-groups">
               <div class="weekly-mapping-group-item">
@@ -372,11 +382,16 @@ const SHORTCUTS = __SHORTCUTS_JSON__;
 
         <!-- 이슈 목록 -->
         <div id="weekly-issues-area" style="display:none">
-          <div class="weekly-issues-header">
-            <span id="weekly-issues-count" style="font-size:13px;color:var(--text-muted)">0건</span>
-            <button class="btn btn-primary" id="weekly-generate-btn" onclick="weeklyGenerate()">🤖 주간보고 생성</button>
+          <div class="collapsible-header" onclick="toggleWeeklyIssues()">
+            <span id="weekly-issues-count" style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px">조회된 이슈 0건</span>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn btn-primary" id="weekly-generate-btn" onclick="event.stopPropagation(); weeklyGenerate()">🤖 주간보고 생성</button>
+              <span id="weekly-issues-arrow" class="toggle-arrow">▼</span>
+            </div>
           </div>
-          <div id="weekly-issues-list" class="weekly-issues-list"></div>
+          <div class="collapsible-body weekly-issues-body open" id="weekly-issues-body">
+            <div id="weekly-issues-list" class="weekly-issues-list"></div>
+          </div>
         </div>
 
         <!-- 생성 결과 -->

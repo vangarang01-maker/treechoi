@@ -220,10 +220,10 @@ class Handler(BaseHTTPRequestHandler):
                     token=env_in.get("JIRA_PAT_TOKEN")
                 ))
             elif path == "/api/similar-issues":
-                users = body.get("users", [])
+                scope_users = body.get("scope_users", [])
                 env_in = body.get("env", {})
                 self._send_json(api_similar_issues(
-                    users,
+                    scope_users,
                     api_key=env_in.get("GEMINI_API_KEY"),
                     token=env_in.get("JIRA_PAT_TOKEN")
                 ))

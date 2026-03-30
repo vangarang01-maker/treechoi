@@ -16,14 +16,30 @@ _DEADLINE_CANDIDATES = [
     "customfield_17500",
 ]
 
+_EXCLUDED_STATUSES = {"변경이관", "작업이관", "반려", "팀이관", "프로젝트이관"}
+
+_DEPLOY_COMPLETE_FIELD = "customfield_11304"  # 변경관리 배포완료일시
+
 _SEARCH_FIELDS = ",".join([
     "summary", "status", "issuetype", "created", "reporter", "description",
     "comment",
+    _DEPLOY_COMPLETE_FIELD,
     *_DEADLINE_CANDIDATES,
 ])
 
 
-def _get_deadline(fields: dict) -> str | None:
+def _clean_name(name: str) -> str:
+    """displayName의 ∙ 문자를 _ 로 치환"""
+    return name.replace("\u2219", "_").replace("\u00b7", "_").replace("\u2022", "_").replace("∙", "_")
+
+
+def _get_deadline(fields: dict, issue_type: str = "") -> str | None:
+    # 변경관리: 배포완료일시 우선
+    if issue_type == "변경관리":
+        val = fields.get(_DEPLOY_COMPLETE_FIELD)
+        if val and isinstance(val, str) and len(val) >= 10:
+            return val[:10]
+    # 공통: 합의완료일 후보 필드 순서대로
     for cf in _DEADLINE_CANDIDATES:
         val = fields.get(cf)
         if val and isinstance(val, str) and len(val) >= 10 and val[:4].isdigit():
@@ -77,15 +93,18 @@ def api_weekly_fetch(token: str, date_from: str, date_to: str) -> dict:
                 _filter_comments(f.get("comment"), date_from, date_to)
                 if issue_type == "변경관리" else []
             )
+            status_name = (f.get("status") or {}).get("name", "")
+            if status_name in _EXCLUDED_STATUSES:
+                continue
             issues.append({
                 "key": key,
                 "summary": f.get("summary", ""),
                 "issue_type": issue_type,
-                "status": (f.get("status") or {}).get("name", ""),
+                "status": status_name,
                 "created": (f.get("created") or "")[:10],
-                "reporter": (f.get("reporter") or {}).get("displayName", ""),
+                "reporter": _clean_name((f.get("reporter") or {}).get("displayName", "")),
                 "description": (f.get("description") or "")[:500],
-                "deadline": _get_deadline(f),
+                "deadline": _get_deadline(f, issue_type),
                 "comments": comments_in_range,
             })
 
@@ -130,9 +149,13 @@ def api_weekly_generate(
     for issue in issues:
         grouped.setdefault(_get_group(issue["status"]), []).append(issue)
 
-    # 이슈 블록 구성
+    # 이슈 블록 구성 (제외 상태 및 기타 그룹 제외)
     issue_blocks = []
     for issue in issues:
+        if issue["status"] in _EXCLUDED_STATUSES:
+            continue
+        if _get_group(issue["status"]) == "기타":
+            continue
         key = issue["key"]
         deadline = (overrides.get(key) or {}).get("deadline") or issue.get("deadline") or ""
         deadline_fmt = f"~{_fmt_date(deadline)}" if deadline else "~(목표일 미입력)"
@@ -196,6 +219,6 @@ SCM3-XXXX 제목 (M/D~)
         if not result.get("ok"):
             return {"ok": False, "error": result.get("error", "AI 생성 실패")}
 
-        return {"ok": True, "report": result.get("content", "").strip()}
+        return {"ok": True, "report": result.get("reply", "").strip()}
     except Exception as e:
         return {"ok": False, "error": str(e)}

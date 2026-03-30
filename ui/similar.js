@@ -1,4 +1,4 @@
-// ── 유사 이슈 검색 ──
+// ── 참고 이슈 검색 ──
 
 let similarUsers = [];
 
@@ -14,6 +14,9 @@ function initSimilarUsers() {
   } catch(e) {}
   renderUserTags();
 
+  // 캐시 상태 로드 (검색 범위 체크박스 포함)
+  loadCacheStatus();
+
   // 검색 결과 복원
   try {
     const savedResults = localStorage.getItem('similar_results');
@@ -26,6 +29,40 @@ function initSimilarUsers() {
       }
     }
   } catch(e) {}
+}
+
+// ── 검색 범위 체크박스 ──
+
+function renderScopeCheckboxes(users) {
+  const area = document.getElementById('similar-scope-checkboxes');
+  if (!area) return;
+  if (!users || users.length === 0) {
+    area.innerHTML = '<span class="similar-scope-empty">캐시를 구축하면 여기에 사용자가 표시됩니다</span>';
+    return;
+  }
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem('similar_scope_users') || '[]'); } catch(e) {}
+  const selected = saved.length > 0 ? saved : [...users];
+  area.innerHTML = users.map(u => `
+    <label class="similar-scope-checkbox">
+      <input type="checkbox" value="${escHtml(u)}" ${selected.includes(u) ? 'checked' : ''}
+             onchange="saveScopeSelection()">
+      <span>${escHtml(u)}</span>
+    </label>
+  `).join('');
+}
+
+function saveScopeSelection() {
+  const boxes = document.querySelectorAll('#similar-scope-checkboxes input[type=checkbox]');
+  const selected = [...boxes].filter(c => c.checked).map(c => c.value);
+  try { localStorage.setItem('similar_scope_users', JSON.stringify(selected)); } catch(e) {}
+}
+
+function getSelectedScopeUsers() {
+  const boxes = document.querySelectorAll('#similar-scope-checkboxes input[type=checkbox]');
+  if (!boxes.length) return similarUsers;
+  const selected = [...boxes].filter(c => c.checked).map(c => c.value);
+  return selected.length > 0 ? selected : similarUsers;
 }
 
 function _renderSimilarResults(results) {
@@ -100,12 +137,14 @@ async function loadCacheStatus() {
     if (!data.ok) { el.textContent = '캐시 오류: ' + data.error; return; }
     if (!data.exists) {
       el.innerHTML = '<span style="color:var(--warn)">캐시 없음 — 캐시를 구축해주세요</span>';
+      renderScopeCheckboxes([]);
       return;
     }
     const meta = data.meta || {};
     const counts = Object.entries(data.type_counts || {})
       .map(([t, n]) => `${t} ${n}건`).join(', ');
     el.innerHTML = `캐시: <strong>${counts}</strong> · ${meta.created_at ? meta.created_at.slice(0, 10) : ''} 갱신`;
+    renderScopeCheckboxes(meta.users || []);
   } catch(e) {
     el.textContent = '캐시 상태 로드 실패';
   }
@@ -182,6 +221,7 @@ async function buildCache(issuetype) {
       btn.disabled = false;
       btn.textContent = issuetype === '서비스요청관리' ? '🔄 서비스요청관리' : '🔄 변경관리';
       otherBtn.disabled = false;
+      localStorage.removeItem('similar_scope_users'); // 재구축 시 선택 초기화
       loadCacheStatus();
 
       setTimeout(() => {
@@ -219,7 +259,7 @@ async function searchSimilar() {
     const res = await fetch('/api/similar-issues', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({users: similarUsers, env: getEnv()}),
+      body: JSON.stringify({scope_users: getSelectedScopeUsers(), env: getEnv()}),
     });
     const data = await res.json();
     if (!data.ok) {
@@ -240,7 +280,7 @@ async function searchSimilar() {
     results.innerHTML = `<div class="error-card">⚠ ${escHtml(e.message)}</div>`;
   } finally {
     btn.disabled = false;
-    btn.textContent = '🔍 유사 이슈 검색';
+    btn.textContent = '🔍 참고 이슈 검색';
   }
 }
 
@@ -287,16 +327,10 @@ function buildSimilarCard(item) {
           <a class="sim-key" href="${JIRA_BASE_URL}/browse/${escHtml(s.key)}" target="_blank" rel="noopener">${escHtml(s.key)}</a>
           <span class="sim-summary">${escHtml(s.summary)}</span>
         </div>`).join('')
-    : '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">유사 이슈를 찾지 못했습니다 (캐시에 같은 타입 이슈 없음)</div>';
+    : '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">참고 이슈를 찾지 못했습니다 (캐시에 같은 타입 이슈 없음)</div>';
 
   const errorBadge = item.error
     ? `<span style="color:var(--warn);font-size:11px;">임베딩 실패: ${escHtml(item.error)}</span>`
-    : '';
-
-  const similarKeys = (item.similar || []).map(s => s.key);
-  const verifyBtnHtml = similarKeys.length > 0
-    ? `<button class="btn-ai-verify" onclick="verifyIssue('${escHtml(item.key)}', this)">🤖 AI검증</button>
-       <div class="ai-verify-result"></div>`
     : '';
 
   wrap.innerHTML = `
@@ -309,41 +343,8 @@ function buildSimilarCard(item) {
     <div class="similar-card-title">${escHtml(item.summary)}</div>
     ${errorBadge}
     <div class="similar-list">${similarHtml}</div>
-    ${verifyBtnHtml}
-
-    <div class="card-actions">
-      <button class="btn-action" onclick="toggleCommentForm('${escHtml(item.key)}', this)">
-        <i class="far fa-comment-dots"></i> 댓글
-      </button>
-      <button class="btn-action" onclick="toggleTransitionForm('${escHtml(item.key)}', this)">
-        <i class="fas fa-exchange-alt"></i> 상태
-      </button>
-      <a href="${JIRA_BASE_URL}/browse/${escHtml(item.key)}" target="_blank" class="btn-action" style="text-decoration:none">
-        <i class="fas fa-external-link-alt"></i> Jira
-      </a>
-    </div>
-
-    <!-- 액션 폼 영역 (기본 숨김) -->
-    <div id="comment-form-${escHtml(item.key)}" class="action-form" style="display:none">
-      <textarea placeholder="댓글 내용을 입력하세요..." rows="2"></textarea>
-      <div class="action-form-footer">
-        <button class="btn-form-cancel" onclick="toggleCommentForm('${escHtml(item.key)}')">취소</button>
-        <button class="btn-form-submit" onclick="submitComment('${escHtml(item.key)}')">등록</button>
-      </div>
-    </div>
-
-    <div id="transition-form-${escHtml(item.key)}" class="action-form" style="display:none">
-      <select id="trans-select-${escHtml(item.key)}">
-        <option value="">불러오는 중...</option>
-      </select>
-      <div class="action-form-footer">
-        <button class="btn-form-cancel" onclick="toggleTransitionForm('${escHtml(item.key)}')">취소</button>
-        <button class="btn-form-submit" onclick="submitTransition('${escHtml(item.key)}')">변경</button>
-      </div>
-    </div>
   `;
   wrap.dataset.issueKey = item.key;
-  wrap.dataset.similarKeys = JSON.stringify(similarKeys);
   return wrap;
 }
 

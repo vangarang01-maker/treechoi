@@ -1,17 +1,15 @@
 """이슈 처리 마법사 — 이슈 감지 및 AI 초안 생성"""
-import os
 import re
 from datetime import date
 
 from .jira import jira_get, JIRA_BASE_URL
 from .ai_router import api_requirements, api_review, api_test, api_procedure, api_approval, api_sr_draft
-from .devx_ai import api_devx_safe_query
 from .settings import api_read
 
 # 변경관리 상태 → (다음 할 일 안내, 생성 가능한 초안 목록)
 _CHANGE_STATUS_MAP = {
     "미해결":     ("요건정의서를 작성하고, 영향도분석 상태로 전환하세요.", ["requirements"]),
-    "영향도 분석":  ("요건정의서를 보완하고, 변경검토회의 내용을 작성한 후 필수 산출물 탭을 직접 입력하고 변경계획결재 상신하세요.", ["requirements", "review"]),
+    "영향도 분석":  ("요건정의서를 보완하고, 변경검토회의 내용을 작성한 후 필수 산출물 탭을 직접 입력하고 변경계획결재 상신하세요.", ["requirements", "review", "test"]),
     "개발 중":      ("테스트케이스를 작성하세요.", ["test"]),
     "배포계획수립": ("배포결재 멘트·배포절차·원복계획을 작성하세요.", ["approval", "procedure", "rollback"]),
     "배포 계획 완료": ("배포결재 멘트·배포절차·원복계획을 작성하세요.", ["approval", "procedure", "rollback"]),
@@ -41,7 +39,6 @@ _DRAFT_LABEL = {
     "test":         "테스트케이스",
     "approval":     "배포결재 멘트",
     "procedure":    "배포절차",
-    "safe_query":   "안전 쿼리(백업/복구)",
     "rollback":     "원복계획",
     "sr_draft":     "처리 내용 초안",
 }
@@ -102,12 +99,6 @@ def api_wizard_detect(token: str, issue_key: str) -> dict:
     if issue_type == "변경관리":
         matched = _match_status(_CHANGE_STATUS_MAP, status)
         next_action, available_drafts = matched or (f"현재 상태 '{status}' — 다음 단계를 확인하세요.", [])
-        available_drafts = list(available_drafts)  # 원본 수정 방지
-        # DB 데이터 변경 이슈이고 배포 관련 단계면 안전 쿼리 버튼 추가
-        _DB_SAFE_QUERY_STATUSES = {"영향도 분석", "개발 중", "배포계획수립", "배포 계획 완료", "현업확인", "현업확인 결재 대기", "배포", "긴급 배포"}
-        if "DB" in change_type.upper() and any(s in status for s in _DB_SAFE_QUERY_STATUSES):
-            if "safe_query" not in available_drafts:
-                available_drafts.append("safe_query")
     elif issue_type == "서비스요청관리":
         matched = _match_status(_SR_STATUS_MAP, status)
         # 완료가 아닌 미지정 상태도 초안 버튼 표시
@@ -283,19 +274,13 @@ def api_wizard_draft(
     model: str = None,
 ) -> dict:
     """AI 초안 생성"""
-    cfg = api_read(mask_sensitive=False)
-    if not cfg.get("ok"):
-        return {"ok": False, "error": cfg.get("error", "설정 로드 실패")}
-    env = cfg.get("env", {})
-    provider = os.environ.get("AI_PROVIDER", env.get("AI_PROVIDER", "gemini")).lower()
-    if provider == "devx":
-        if not api_key:
-            api_key = env.get("DEVX_API_KEY", "").strip()
-    else:
-        if not api_key:
-            api_key = env.get("GEMINI_API_KEY", "").strip()
-        if not model:
-            model = env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key or not model:
+        cfg = api_read(mask_sensitive=False)
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error", "설정 로드 실패")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
 
     try:
         fields = "summary,description,customfield_16460,customfield_16601,customfield_17901,customfield_17903"
@@ -381,15 +366,6 @@ def api_wizard_draft(
             content = result["content"]
         else:
             content = _fallback_approval(summary)
-            fallback_used = True
-
-    elif draft_type == "safe_query":
-        dml_query = (overrides or {}).get("dml_query", "")
-        result = api_devx_safe_query(summary, description, dml_query=dml_query, api_key=api_key)
-        if result.get("ok"):
-            content = result["content"]
-        else:
-            content = f"-- 백업 쿼리 (변경 전 데이터 조회)\nSELECT * FROM [테이블명] WHERE [조건];\n\n-- 변경 쿼리\nUPDATE [테이블명] SET [컬럼] = [변경값] WHERE [조건];\n\n-- 복구 쿼리 (원복용)\nUPDATE [테이블명] SET [컬럼] = [원래값] WHERE [조건];"
             fallback_used = True
 
     elif draft_type == "rollback":

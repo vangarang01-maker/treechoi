@@ -58,9 +58,15 @@ def _init_db(conn: sqlite3.Connection) -> None:
             issuetype TEXT,
             summary  TEXT,
             vector   TEXT,
-            updated  TEXT
+            updated  TEXT,
+            assignee TEXT
         )
     """)
+    # 기존 DB에 assignee 컬럼 없을 경우 추가 (마이그레이션)
+    try:
+        conn.execute("ALTER TABLE issues ADD COLUMN assignee TEXT")
+    except Exception:
+        pass
     conn.execute("""
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
@@ -75,12 +81,13 @@ def _load_cache() -> dict:
     with sqlite3.connect(str(DB_FILE)) as conn:
         _init_db(conn)
         issues = {}
-        for row in conn.execute("SELECT key, issuetype, summary, vector, updated FROM issues"):
+        for row in conn.execute("SELECT key, issuetype, summary, vector, updated, assignee FROM issues"):
             issues[row[0]] = {
                 "issuetype": row[1],
                 "summary":   row[2],
                 "vector":    json.loads(row[3]),
                 "updated":   row[4],
+                "assignee":  row[5] or "",
             }
         meta = {}
         for row in conn.execute("SELECT key, value FROM meta"):
@@ -100,9 +107,10 @@ def _save_cache(cache: dict) -> None:
             conn.execute("DELETE FROM meta")
             for key, v in cache.get("issues", {}).items():
                 conn.execute(
-                    "INSERT INTO issues (key, issuetype, summary, vector, updated) VALUES (?,?,?,?,?)",
+                    "INSERT INTO issues (key, issuetype, summary, vector, updated, assignee) VALUES (?,?,?,?,?,?)",
                     (key, v.get("issuetype", ""), v.get("summary", ""),
-                     json.dumps(v.get("vector", [])), v.get("updated", ""))
+                     json.dumps(v.get("vector", [])), v.get("updated", ""),
+                     v.get("assignee", ""))
                 )
             for k, v in cache.get("meta", {}).items():
                 conn.execute(
@@ -163,34 +171,38 @@ def api_embedding_build_stream(users: list, api_key: str = None, token: str = No
     first_embed_error: str = ""
     jira_counts: dict = {}
 
-    user_jql = ", ".join(f'"{u}"' for u in users) if users else "currentUser()"
-
     target_types = [issuetype] if issuetype else EMBED_TYPES
+    user_list = users if users else ["currentUser()"]
 
-    # 1단계: 전체 이슈 목록 확보
+    # 1단계: 사용자별·유형별 이슈 목록 확보 (사번을 assignee 태그로 직접 사용)
+    # all_issues: list of (user_input, issue_dict)
     all_issues = []
     for issuetype in target_types:
-        jql = (f'assignee in ({user_jql}) AND status = "완료"'
-               f' AND issuetype = "{issuetype}" ORDER BY updated DESC')
-        params = urlencode({
-            "jql": jql, "maxResults": 100,
-            "fields": "summary,description,issuetype,updated",
-        })
-        try:
-            yield {"step": "jira_search", "issuetype": issuetype, "msg": f"{issuetype} 이슈 조회 중..."}
-            resp = jira_get(token, f"{JIRA_BASE_URL}/rest/api/2/search?{params}")
-            fetched = resp.get("issues", [])
-            jira_counts[issuetype] = len(fetched)
-            all_issues.extend(fetched)
-        except Exception as e:
-            yield {"ok": False, "error": f"{issuetype} 조회 실패: {e}"}
-            return
+        jira_counts[issuetype] = 0
+        for user in user_list:
+            jql = (f'assignee = "{user}" AND status = "완료"'
+                   f' AND issuetype = "{issuetype}" ORDER BY updated DESC')
+            params = urlencode({
+                "jql": jql, "maxResults": 100,
+                "fields": "summary,description,issuetype,updated",
+            })
+            try:
+                yield {"step": "jira_search", "issuetype": issuetype,
+                       "msg": f"{issuetype} / {user} 이슈 조회 중..."}
+                resp = jira_get(token, f"{JIRA_BASE_URL}/rest/api/2/search?{params}")
+                fetched = resp.get("issues", [])
+                jira_counts[issuetype] = jira_counts[issuetype] + len(fetched)
+                for issue in fetched:
+                    all_issues.append((user, issue))
+            except Exception as e:
+                yield {"ok": False, "error": f"{issuetype}/{user} 조회 실패: {e}"}
+                return
 
     total_to_process = len(all_issues)
     yield {"step": "start", "total": total_to_process, "msg": f"총 {total_to_process}건의 이슈 처리를 시작합니다."}
 
     # 2단계: 개별 이슈 처리 (임베딩 등)
-    for i, issue in enumerate(all_issues):
+    for i, (user_input, issue) in enumerate(all_issues):
         key = issue.get("key", "")
         issuetype = (issue.get("fields", {}) or {}).get("issuetype", {}).get("name", "")
 
@@ -203,7 +215,10 @@ def api_embedding_build_stream(users: list, api_key: str = None, token: str = No
         }
 
         if key in existing:
-            issues_data[key] = existing[key]
+            # 기존 캐시 재사용 시 assignee를 현재 user_input으로 갱신
+            cached_entry = dict(existing[key])
+            cached_entry["assignee"] = user_input
+            issues_data[key] = cached_entry
             reused += 1
             continue
 
@@ -222,6 +237,7 @@ def api_embedding_build_stream(users: list, api_key: str = None, token: str = No
             "summary": f.get("summary", ""),
             "vector": vector,
             "updated": (f.get("updated") or "")[:10],
+            "assignee": user_input,  # 입력한 사번을 그대로 태깅
         }
         added += 1
 
@@ -262,8 +278,11 @@ def api_embedding_build(users: list, api_key: str = None, token: str = None, iss
     return last_res
 
 
-def api_similar_issues(users: list, api_key: str = None, token: str = None) -> dict:
-    """미해결 이슈별 유사 완료 이슈 Top 3"""
+def api_similar_issues(scope_users: list, api_key: str = None, token: str = None) -> dict:
+    """미해결 이슈별 참고 완료 이슈 Top 3
+    scope_users: 완료 이슈 참고 풀 필터 (캐시 내 누구 것을 볼지).
+                 미해결 이슈 조회는 항상 PAT 토큰 소유자(currentUser()) 기준.
+    """
     if not api_key or not token:
         cfg = api_read(mask_sensitive=False)
         if not cfg.get("ok"):
@@ -280,9 +299,9 @@ def api_similar_issues(users: list, api_key: str = None, token: str = None) -> d
         return {"ok": False, "error": "캐시가 없습니다. 먼저 캐시를 구축해주세요."}
 
     cached = _load_cache().get("issues", {})
-    user_jql = ", ".join(f'"{u}"' for u in users) if users else "currentUser()"
     type_list = ", ".join(f'"{t}"' for t in EMBED_TYPES)
-    jql = (f'assignee in ({user_jql})'
+    # 미해결 이슈는 PAT 토큰 소유자(currentUser()) 기준으로 고정
+    jql = (f'assignee = currentUser()'
            f' AND status not in ("완료", "반려", "중단", "변경이관", "팀이관")'
            f' AND issuetype in ({type_list})'
            f' ORDER BY updated DESC')
@@ -321,6 +340,7 @@ def api_similar_issues(users: list, api_key: str = None, token: str = None) -> d
             }
             for ck, cv in cached.items()
             if cv.get("issuetype") == issuetype
+            and (not scope_users or cv.get("assignee", "") in scope_users)
         ]
         top3 = sorted(sims, key=lambda x: x["score"], reverse=True)[:3]
         results.append({

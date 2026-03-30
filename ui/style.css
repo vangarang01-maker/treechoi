@@ -551,7 +551,53 @@ body {
 }
 .tooltip-wrap:hover .tooltip-box { display: block; }
 
-/* ── 유사 이슈 패널 ── */
+/* ── 검색 범위 섹션 ── */
+.similar-scope-section {
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt, var(--surface));
+}
+.similar-scope-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  margin-bottom: 8px;
+}
+.similar-scope-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.similar-scope-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.similar-scope-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--surface);
+  transition: background .15s, border-color .15s;
+  user-select: none;
+}
+.similar-scope-checkbox:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg, #e8f0fe);
+}
+.similar-scope-checkbox input[type=checkbox] {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+/* ── 참고 이슈 패널 ── */
 .similar-panel {
   flex: 1;
   min-height: 0;
@@ -642,7 +688,7 @@ body {
 }
 .type-section-body:not(.active) { display: none; }
 
-/* 유사 이슈 카드 */
+/* 참고 이슈 카드 */
 .similar-card {
   background: var(--surface2); border: 1px solid var(--border);
   border-radius: 10px; padding: 14px 16px;
@@ -1134,3 +1180,5 @@ body {
   flex: 1; width: 100%; min-height: 400px; resize: vertical;
   border: none; border-radius: 0; padding: 16px;
 }
+
+.collapsible-body.weekly-issues-body.open { max-height: 400px; overflow-y: auto; }

@@ -317,12 +317,12 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         self._send_json(api_weekly_fetch(token, date_from, date_to))
             elif path == "/api/weekly-generate":
-                issues    = body.get("issues", [])
-                overrides = body.get("overrides", {})
-                status_map = body.get("status_map", {})
-                date_from = body.get("date_from", "").strip()
-                date_to   = body.get("date_to", "").strip()
-                env_in    = body.get("env", {})
+                issues    = body.get("issues") or []
+                overrides = body.get("overrides") or {}
+                status_map = body.get("status_map") or {}
+                date_from = (body.get("date_from") or "").strip()
+                date_to   = (body.get("date_to") or "").strip()
+                env_in    = body.get("env") or {}
                 if not issues:
                     self._send_json({"ok": False, "error": "issues가 비어있습니다."}, 400)
                 else:

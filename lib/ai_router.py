@@ -4,12 +4,12 @@ import os
 from .gemini import (
     api_gemini_requirements, api_gemini_review, api_gemini_test,
     api_gemini_procedure, api_gemini_approval, api_gemini_sr_draft,
-    api_gemini_check,
+    api_gemini_safe_query, api_gemini_check,
 )
 from .devx_ai import (
     api_devx_requirements, api_devx_review, api_devx_test,
     api_devx_procedure, api_devx_approval, api_devx_sr_draft,
-    api_devx_check,
+    api_devx_safe_query, api_devx_check,
 )
 
 
@@ -56,6 +56,12 @@ def api_approval(summary, description, change_type, api_key=None, model=None, **
     if get_provider() == "devx":
         return api_devx_approval(summary, description, change_type)
     return api_gemini_approval(summary, description, change_type, api_key, model)
+
+
+def api_safe_query(summary, description, dml_query="", api_key=None, model=None, **kwargs):
+    if get_provider() == "devx":
+        return api_devx_safe_query(summary, description, dml_query, api_key=api_key)
+    return api_gemini_safe_query(summary, description, dml_query, api_key, model)
 
 
 def api_sr_draft(work_type, summary, description, api_key=None, model=None, **kwargs):

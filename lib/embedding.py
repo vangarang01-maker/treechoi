@@ -162,11 +162,19 @@ def api_embedding_build_stream(users: list, api_key: str = None, token: str = No
         yield {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
         return
 
-    # 기존 캐시 로드 (특정 유형 구축 시 다른 유형은 그대로 유지)
+    # 기존 캐시 로드 (대상 사용자가 아닌 기존 이슈는 유형 무관하게 보존)
     cache_data = _load_cache()
     existing = cache_data.get("issues", {})
-    issues_data: dict = {k: v for k, v in existing.items()
-                         if issuetype and v.get("issuetype") != issuetype}
+    user_set = set(users) if users else set()
+    if issuetype:
+        # 유형별 구축: 다른 유형은 모두 유지, 같은 유형이라도 대상 사용자가 아니면 유지
+        issues_data: dict = {k: v for k, v in existing.items()
+                             if v.get("issuetype") != issuetype
+                             or v.get("assignee", "") not in user_set}
+    else:
+        # 전체 구축: 대상 사용자가 아닌 기존 이슈는 그대로 유지
+        issues_data: dict = {k: v for k, v in existing.items()
+                             if v.get("assignee", "") not in user_set}
     added = skipped = reused = 0
     first_embed_error: str = ""
     jira_counts: dict = {}
@@ -241,9 +249,13 @@ def api_embedding_build_stream(users: list, api_key: str = None, token: str = No
         }
         added += 1
 
+    # 실제 캐시에 존재하는 assignee 목록을 도출 (입력 파라미터 대신 실제 데이터 기준)
+    actual_users = list(dict.fromkeys(
+        v.get("assignee", "") for v in issues_data.values() if v.get("assignee")
+    ))
     cache = {
         "meta": {
-            "users": users,
+            "users": actual_users,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "issue_count": len(issues_data),
         },

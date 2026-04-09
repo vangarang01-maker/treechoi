@@ -269,6 +269,23 @@ def api_devx_chat(history: list, message: str, api_key: str = None, **kwargs) ->
     return {"ok": True, "reply": reply, "latency_ms": latency, "model": "DevX AI"}
 
 
+def api_devx_weekly(full_prompt: str, data_query: str, api_key: str = None) -> dict:
+    """DevX AI 주간보고 초안 생성.
+    에이전트 설정 시 data_query만 전송 (지시문은 에이전트 시스템 프롬프트에 있음).
+    미설정 시 full_prompt를 playground로 전송.
+    """
+    if os.environ.get("DEVX_AGENT_WEEKLY", "").strip():
+        query = data_query
+    else:
+        query = full_prompt
+    ok, reply = _call_devx("DEVX_AGENT_WEEKLY", query, api_key)
+    if not ok:
+        return {"ok": False, "error": reply}
+    if not reply:
+        return {"ok": False, "error": "빈 응답"}
+    return {"ok": True, "reply": reply}
+
+
 def api_devx_check(api_key: str = None) -> dict:
     """DevX AI API 상태 확인 (ping)"""
     resolved_key = _get_devx_api_key(api_key)

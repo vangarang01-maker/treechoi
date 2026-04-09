@@ -455,6 +455,51 @@ def api_gemini_sr_draft(
     return {"ok": True, "content": reply}
 
 
+def api_gemini_safe_query(
+    summary: str, description: str,
+    dml_query: str = "",
+    api_key: str = None, model: str = None,
+) -> dict:
+    """DB HOTFIX 결재용 백업·변경·복구 쿼리 3단 세트 생성"""
+    if not api_key or not model:
+        cfg = api_read(mask_sensitive=False)
+        if not cfg.get("ok"):
+            return {"ok": False, "error": cfg.get("error")}
+        env = cfg.get("env", {})
+        api_key = api_key or env.get("GEMINI_API_KEY", "").strip()
+        model = model or env.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY가 설정되지 않았습니다."}
+
+    from datetime import date as _date
+    today = _date.today().strftime("%Y-%m-%d")
+    dml_section = f"\n\n실행할 DML 쿼리:\n{dml_query}" if dml_query.strip() else ""
+    prompt = (
+        f"당신은 DB 변경 작업 전문가입니다. 아래 이슈 정보를 바탕으로 "
+        f"HOTFIX 결재용 안전 쿼리 3단 세트(백업 SELECT, 변경 DML, 원복 DML)를 작성하세요.\n\n"
+        f"오늘 날짜: {today}\n"
+        f"이슈 제목: {summary}\n"
+        f"이슈 내용:\n{description or '(내용 없음)'}"
+        f"{dml_section}\n\n"
+        "출력 형식:\n"
+        "-- [1단계] 백업 (변경 전 현재 값 보존)\n"
+        "<SELECT 쿼리>\n\n"
+        "-- [2단계] 변경 (DML 실행)\n"
+        "BEGIN;\n<UPDATE/DELETE 쿼리>\nCOMMIT;\n\n"
+        "-- [3단계] 복구 (원복 시 사용)\n"
+        "BEGIN;\n<원복 쿼리>\nCOMMIT;\n\n"
+        "규칙: 마크다운 코드블록(```) 없이 순수 SQL 텍스트로만 출력."
+    )
+
+    ok, reply = _call_gemini(api_key, model, prompt, temperature=0.2, max_tokens=1024)
+    if not ok:
+        return {"ok": False, "error": reply}
+    reply = re.sub(r"```[^\n]*\n?", "", reply).strip()
+    if not reply:
+        return {"ok": False, "error": "빈 응답"}
+    return {"ok": True, "content": reply}
+
+
 def api_gemini_check(api_key: str = None, model: str = None) -> dict:
     """Gemini API 상태 확인 (countTokens로 ping)"""
     if not api_key or not model:

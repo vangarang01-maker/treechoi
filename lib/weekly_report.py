@@ -135,49 +135,64 @@ def api_weekly_generate(
     provider: str = "gemini",
 ) -> dict:
     """AI 주간보고 초안 생성"""
+    # null/None 방어
+    if not isinstance(issues, list):
+        issues = []
+    if not isinstance(overrides, dict):
+        overrides = {}
+    if not isinstance(status_map, dict):
+        status_map = {}
 
     def _get_group(status_name: str) -> str:
         for group, statuses in status_map.items():
-            if status_name in statuses:
+            if isinstance(statuses, list) and status_name in statuses:
                 return group
         return "기타"
 
-    # 그룹별 분류
-    group_order = ["검토중", "진행중", "완료"]
-    grouped: dict = {g: [] for g in group_order}
-    grouped["기타"] = []
-    for issue in issues:
-        grouped.setdefault(_get_group(issue["status"]), []).append(issue)
+    try:
+        # 그룹별 분류
+        group_order = ["검토중", "진행중", "완료"]
+        grouped: dict = {g: [] for g in group_order}
+        grouped["기타"] = []
+        for issue in issues:
+            grouped.setdefault(_get_group(issue.get("status", "")), []).append(issue)
 
-    # 이슈 블록 구성 (제외 상태 및 기타 그룹 제외)
-    issue_blocks = []
-    for issue in issues:
-        if issue["status"] in _EXCLUDED_STATUSES:
-            continue
-        if _get_group(issue["status"]) == "기타":
-            continue
-        key = issue["key"]
-        deadline = (overrides.get(key) or {}).get("deadline") or issue.get("deadline") or ""
-        deadline_fmt = f"~{_fmt_date(deadline)}" if deadline else "~(목표일 미입력)"
-        created_fmt = _fmt_date(issue.get("created", ""))
-        group = _get_group(issue["status"])
+        # 이슈 블록 구성 (제외 상태 및 기타 그룹 제외)
+        issue_blocks = []
+        for issue in issues:
+            status = issue.get("status", "")
+            if status in _EXCLUDED_STATUSES:
+                continue
+            if _get_group(status) == "기타":
+                continue
+            key = issue.get("key", "")
+            deadline = (overrides.get(key) or {}).get("deadline") or issue.get("deadline") or ""
+            deadline_fmt = f"~{_fmt_date(deadline)}" if deadline else "~(목표일 미입력)"
+            created_fmt = _fmt_date(issue.get("created", ""))
+            group = _get_group(status)
 
-        block = (
-            f"=== {key} | {issue['issue_type']} | 그룹:{group} ===\n"
-            f"제목: {issue['summary']}\n"
-            f"요청자: {issue['reporter']}\n"
-            f"생성일: {created_fmt}\n"
-            f"현재상태: {issue['status']}\n"
-            f"목표일: {deadline_fmt}\n"
-            f"내용: {issue['description'][:400]}\n"
-        )
-        if issue.get("comments"):
-            comments_txt = "\n".join(
-                f"  [{_fmt_date(c['date'])}] {c['body'][:200]}"
-                for c in issue["comments"]
+            block = (
+                f"=== {key} | {issue.get('issue_type', '')} | 그룹:{group} ===\n"
+                f"제목: {issue.get('summary', '')}\n"
+                f"요청자: {issue.get('reporter', '')}\n"
+                f"생성일: {created_fmt}\n"
+                f"현재상태: {status}\n"
+                f"목표일: {deadline_fmt}\n"
+                f"내용: {(issue.get('description') or '')[:400]}\n"
             )
-            block += f"기간내 댓글:\n{comments_txt}\n"
-        issue_blocks.append(block)
+            if issue.get("comments"):
+                comments_txt = "\n".join(
+                    f"  [{_fmt_date(c.get('date', ''))}] {(c.get('body') or '')[:200]}"
+                    for c in issue["comments"]
+                    if isinstance(c, dict)
+                )
+                block += f"기간내 댓글:\n{comments_txt}\n"
+            issue_blocks.append(block)
+    except Exception as e:
+        return {"ok": False, "error": f"이슈 데이터 처리 오류: {e}"}
+
+    # 에이전트 전용: 데이터만 담은 쿼리 (지시문은 에이전트 시스템 프롬프트에 있음)
+    data_query = f"조회기간: {date_from} ~ {date_to}\n\n## 이슈 목록\n{''.join(issue_blocks)}"
 
     prompt = f"""다음 Jira 이슈들을 바탕으로 주간보고 초안을 작성하세요.
 조회기간: {date_from} ~ {date_to}
@@ -210,8 +225,8 @@ SCM3-XXXX 제목 (M/D~)
 
     try:
         if provider == "devx":
-            from .devx_ai import api_devx_chat
-            result = api_devx_chat([], prompt, api_key=api_key)
+            from .devx_ai import api_devx_weekly
+            result = api_devx_weekly(prompt, data_query, api_key=api_key)
         else:
             from .gemini import api_gemini_chat
             result = api_gemini_chat([], prompt, api_key=api_key, model=model)

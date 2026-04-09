@@ -3,7 +3,7 @@ import re
 from datetime import date
 
 from .jira import jira_get, JIRA_BASE_URL
-from .ai_router import api_requirements, api_review, api_test, api_procedure, api_approval, api_sr_draft
+from .ai_router import api_requirements, api_review, api_test, api_procedure, api_approval, api_sr_draft, api_safe_query
 from .settings import api_read
 
 # 변경관리 상태 → (다음 할 일 안내, 생성 가능한 초안 목록)
@@ -40,7 +40,13 @@ _DRAFT_LABEL = {
     "approval":     "배포결재 멘트",
     "procedure":    "배포절차",
     "rollback":     "원복계획",
+    "safe_query":   "안전 쿼리",
     "sr_draft":     "처리 내용 초안",
+}
+
+# DB 변경 타입일 때 safe_query 버튼을 노출할 상태 목록
+_SAFE_QUERY_ELIGIBLE_STATUSES = {
+    "영향도 분석", "개발 중", "배포계획수립", "배포 계획 완료", "배포", "긴급 배포",
 }
 
 
@@ -83,6 +89,7 @@ def api_wizard_detect(token: str, issue_key: str) -> dict:
     change_type = work_type_vals[0].get("value", "") if work_type_vals else ""
 
     is_urgent = bool(re.search(r'[\[\(]긴급[\]\)]', summary))
+    is_db = "DB" in change_type.upper()
 
     sr_work_type = _detect_sr_work_type(f) if issue_type == "서비스요청관리" else None
 
@@ -99,6 +106,9 @@ def api_wizard_detect(token: str, issue_key: str) -> dict:
     if issue_type == "변경관리":
         matched = _match_status(_CHANGE_STATUS_MAP, status)
         next_action, available_drafts = matched or (f"현재 상태 '{status}' — 다음 단계를 확인하세요.", [])
+        available_drafts = list(available_drafts)
+        if is_db and _match_status({k: True for k in _SAFE_QUERY_ELIGIBLE_STATUSES}, status):
+            available_drafts.append("safe_query")
     elif issue_type == "서비스요청관리":
         matched = _match_status(_SR_STATUS_MAP, status)
         # 완료가 아닌 미지정 상태도 초안 버튼 표시
@@ -255,6 +265,25 @@ def _fallback_sr_draft(work_type: str, summary: str) -> str:
         )
 
 
+def _fallback_safe_query(summary: str) -> str:
+    today = date.today().strftime("%Y-%m-%d")
+    return (
+        f"-- 오늘 날짜: {today}\n"
+        f"-- 이슈: {summary}\n\n"
+        "-- [1단계] 백업 (변경 전 현재 값 보존)\n"
+        "SELECT * FROM 테이블명 WHERE 조건; -- 직접 입력 필요\n\n"
+        "-- [2단계] 변경 (DML 실행)\n"
+        "BEGIN;\n"
+        "UPDATE 테이블명 SET 컬럼 = 값 WHERE 조건; -- 직접 입력 필요\n"
+        "-- 변경 건수 확인 후 COMMIT\n"
+        "COMMIT;\n\n"
+        "-- [3단계] 복구 (원복 시 사용)\n"
+        "BEGIN;\n"
+        "UPDATE 테이블명 SET 컬럼 = 원래값 WHERE 조건; -- 직접 입력 필요\n"
+        "COMMIT;"
+    )
+
+
 def _fallback_rollback() -> str:
     return (
         "1. 원복계획\n"
@@ -370,6 +399,15 @@ def api_wizard_draft(
 
     elif draft_type == "rollback":
         content = _fallback_rollback()
+
+    elif draft_type == "safe_query":
+        dml_query = (overrides or {}).get("dml_query", "")
+        result = api_safe_query(summary, description, dml_query, api_key=api_key, model=model)
+        if result.get("ok"):
+            content = result["content"]
+        else:
+            content = _fallback_safe_query(summary)
+            fallback_used = True
 
     elif draft_type == "sr_draft":
         work_type = sr_work_type or "기타"

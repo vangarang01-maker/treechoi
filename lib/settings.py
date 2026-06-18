@@ -10,7 +10,7 @@ MCP_NAME = "sbe-jira-mcp"
 _ENV_KEYS = [
     "AI_PROVIDER",
     "GEMINI_API_KEY", "GEMINI_MODEL",
-    "DEVX_API_KEY",
+    "DEVX_API_KEY", "DEVX_CLIENT_ID", "DEVX_CLIENT_SECRET",
     "DEVX_AGENT_REQUIREMENTS", "DEVX_AGENT_REVIEW", "DEVX_AGENT_TEST",
     "DEVX_AGENT_PROCEDURE", "DEVX_AGENT_SAFE_QUERY", "DEVX_AGENT_APPROVAL", "DEVX_AGENT_SR", "DEVX_AGENT_CHAT",
     "JIRA_PAT_TOKEN", "JIRA_USERNAME",
@@ -39,8 +39,10 @@ ENV_FIELDS = [
          {"value": "gemini-2.5-flash-lite",  "label": "gemini-2.5-flash-lite"},
          {"value": "gemini-3-flash-preview", "label": "gemini-3-flash-preview"},
      ]},
-    {"key": "DEVX_API_KEY",   "label": "DevX AI API Key",   "sensitive": True,  "placeholder": "DKx5VXoZ...",
-     "docker_placeholder": "DevX AI API 키 입력 (devx config 또는 팀 공유 키)"},
+    {"key": "DEVX_CLIENT_ID",     "label": "DevX Client ID",     "sensitive": False, "placeholder": "s2s-...",
+     "docker_placeholder": "DevX Gateway System Client ID (Integrations > System Clients에서 발급)"},
+    {"key": "DEVX_CLIENT_SECRET", "label": "DevX Client Secret", "sensitive": True,  "placeholder": "********",
+     "docker_placeholder": "DevX Gateway System Client Secret (최초 1회만 확인 가능)"},
 ]
 
 
@@ -59,7 +61,7 @@ def _find_project_key(data: dict) -> str | None:
     return None
 
 
-_SENSITIVE_KEYS = {"GEMINI_API_KEY", "DEVX_API_KEY", "JIRA_PAT_TOKEN", "JIRA_USERNAME"}
+_SENSITIVE_KEYS = {"GEMINI_API_KEY", "DEVX_API_KEY", "DEVX_CLIENT_SECRET", "JIRA_PAT_TOKEN", "JIRA_USERNAME"}
 
 
 def _docker_env_raw() -> dict:

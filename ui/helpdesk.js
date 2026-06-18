@@ -4,106 +4,37 @@ let geminiHistory = [];
 
 async function sendGemini() {
   const provider = localStorage.getItem('AI_PROVIDER') || 'gemini';
-  const isDevx = provider === 'devx';
 
-  // DevX 모드: 바로 helpdesk-chat으로 (intent 분석 없음)
-  if (isDevx) {
-    const input = document.getElementById('gemini-input');
-    const btn = document.getElementById('gemini-send-btn');
-    const msg = input.value.trim();
-    if (!msg) return;
-    const hint = document.getElementById('gemini-empty-hint');
-    if (hint) hint.remove();
-    appendGeminiUser(msg);
-    input.value = '';
-    input.style.height = 'auto';
-    btn.disabled = true;
-    const spinner = appendGeminiSpinner();
-    try {
-      const res = await fetch('/api/helpdesk-chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({message: msg, history: geminiHistory, env: getEnv()}),
-      });
-      const data = await res.json();
-      spinner.remove();
-      if (!data.ok) {
-        appendGeminiError(data.error || '응답 오류');
-      } else {
-        geminiHistory.push({role: 'user', text: msg});
-        geminiHistory.push({role: 'model', text: data.reply});
-        localStorage.setItem('gemini_chat_history', JSON.stringify(geminiHistory));
-        appendGeminiBot(data.reply, data.latency_ms, data.model);
-      }
-    } catch(e) {
-      if (spinner) spinner.remove();
-      appendGeminiError('요청 실패: ' + e.message);
-    } finally {
-      btn.disabled = false;
-      input.focus();
-    }
-    return;
-  }
+  // gemini/devx 모두 helpdesk-chat 1콜 직행 (의도분석 2단계 제거 → 속도↑)
+  // gemini 모드는 API 키 필요
+  if (provider !== 'devx' && !requireEnv(GEMINI_KEYS)) return;
 
-  // Gemini 모드: 기존 agent-query → gemini-chat 흐름
-  if (!requireEnv(GEMINI_KEYS)) return;
   const input = document.getElementById('gemini-input');
   const btn = document.getElementById('gemini-send-btn');
   const msg = input.value.trim();
   if (!msg) return;
-
   const hint = document.getElementById('gemini-empty-hint');
   if (hint) hint.remove();
-
   appendGeminiUser(msg);
   input.value = '';
   input.style.height = 'auto';
   btn.disabled = true;
-
   const spinner = appendGeminiSpinner();
-
   try {
-    // 1. Agent Query 실행 (의도 분석 및 파라미터 추출)
-    const res = await fetch('/api/agent-query', {
+    const res = await fetch('/api/helpdesk-chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message: msg, env: getEnv()}),
+      body: JSON.stringify({message: msg, history: geminiHistory, env: getEnv()}),
     });
     const data = await res.json();
     spinner.remove();
-
     if (!data.ok) {
-      appendGeminiError(data.error || '분석 중 오류가 발생했습니다.');
-      return;
-    }
-
-    const { intent, jql, action, reason } = data.result;
-
-    if (intent === 'SEARCH' && jql) {
-      appendGeminiBot(`의도: **검색** (Reason: ${reason})\nJQL: \`${jql}\``);
-      switchPage('chat');
-      document.getElementById('chat-input').value = jql;
-      sendChat();
-    } else if (intent === 'ACTION' && action && action.issue_key) {
-      appendAgentActionCard(action, reason);
+      appendGeminiError(data.error || '응답 오류');
     } else {
-      // 일반 채팅으로 전달
-      const chatSpinner = appendGeminiSpinner();
-      const chatRes = await fetch('/api/gemini-chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({message: msg, history: geminiHistory, env: getEnv()}),
-      });
-      const chatData = await chatRes.json();
-      chatSpinner.remove();
-      if (!chatData.ok) {
-        appendGeminiError(chatData.error || '응답 오류');
-      } else {
-        geminiHistory.push({role: 'user', text: msg});
-        geminiHistory.push({role: 'model', text: chatData.reply});
-        localStorage.setItem('gemini_chat_history', JSON.stringify(geminiHistory));
-        appendGeminiBot(chatData.reply, chatData.latency_ms, chatData.model);
-      }
+      geminiHistory.push({role: 'user', text: msg});
+      geminiHistory.push({role: 'model', text: data.reply});
+      localStorage.setItem('gemini_chat_history', JSON.stringify(geminiHistory));
+      appendGeminiBot(data.reply, data.latency_ms, data.model);
     }
   } catch(e) {
     if (spinner) spinner.remove();

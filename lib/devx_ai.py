@@ -1,16 +1,106 @@
-"""DevX AI API — 사내 AI 제공자 (Gemini 대체)"""
+"""DevX AI API — 사내 AI 제공자 (Gemini 대체)
+
+DevX Gateway(3-Token 아키텍처) 연동.
+구 MCP Hub(정적 API Key) → 신 Gateway(client_credentials → 5분 access_token) 전환.
+  1) POST /api/v1/auth/token  (client_id+secret → access_token, 300초)
+  2) POST /api/v1/agent/chat  (Bearer access_token)
+"""
 import json
 import os
 import re
 import ssl
+import threading
 import time
+import urllib.parse
 import urllib.request
 from datetime import date
 
 from .settings import api_read
 from .prompts import load_prompt
 
-DEVX_API_URL = "https://devx-mcp-api.shinsegae-inc.com/api/v1/mcp-command/chat"
+DEVX_GW_BASE = "https://devx-gw.shinsegae-inc.com/api/v1"
+DEVX_TOKEN_URL = f"{DEVX_GW_BASE}/auth/token"
+DEVX_CHAT_URL = f"{DEVX_GW_BASE}/agent/chat"
+
+# 액세스 토큰 캐시 (만료 300초, 30초 여유 두고 갱신)
+_token_lock = threading.Lock()
+_token_cache = {"token": "", "exp": 0.0}
+
+
+def _ssl_ctx() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _get_credentials() -> tuple[str, str]:
+    """(client_id, client_secret) — 환경변수 우선, .env(api_read) 폴백."""
+    cid = os.environ.get("DEVX_CLIENT_ID", "").strip()
+    csec = os.environ.get("DEVX_CLIENT_SECRET", "").strip()
+    if cid and csec:
+        return cid, csec
+    cfg = api_read(mask_sensitive=False)
+    env = cfg.get("env", {}) if cfg.get("ok") else {}
+    return (cid or env.get("DEVX_CLIENT_ID", "").strip(),
+            csec or env.get("DEVX_CLIENT_SECRET", "").strip())
+
+
+def _get_user() -> str:
+    """대화 이력 추적용 사용자 식별자 (사번, 최대 24자)."""
+    user = os.environ.get("JIRA_USERNAME", "").strip()
+    if not user:
+        cfg = api_read(mask_sensitive=False)
+        if cfg.get("ok"):
+            user = cfg.get("env", {}).get("JIRA_USERNAME", "").strip()
+    return (user or "sbe-jira-ui")[:24]
+
+
+def _fetch_token() -> tuple[bool, str]:
+    """Gateway에서 access_token 발급. (ok, token_or_error)."""
+    cid, csec = _get_credentials()
+    if not cid or not csec:
+        return False, "DEVX_CLIENT_ID/DEVX_CLIENT_SECRET가 설정되지 않았습니다."
+    data = urllib.parse.urlencode({
+        "grant_type": "client_credentials",
+        "client_id": cid,
+        "client_secret": csec,
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            DEVX_TOKEN_URL, data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, context=_ssl_ctx(), timeout=20) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        token = body.get("access_token", "")
+        if not token:
+            return False, "토큰 응답에 access_token이 없습니다."
+        expires = int(body.get("expires_in", 300))
+        with _token_lock:
+            _token_cache["token"] = token
+            _token_cache["exp"] = time.time() + max(expires - 30, 30)
+        return True, token
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.loads(e.read().decode("utf-8", errors="replace"))
+            msg = err.get("detail") or err.get("message") or f"HTTP {e.code}"
+        except Exception:
+            msg = f"HTTP {e.code}"
+        return False, f"토큰 발급 실패: {msg}"
+    except Exception as e:
+        return False, f"토큰 발급 실패: {e}"
+
+
+def _get_token(force: bool = False) -> tuple[bool, str]:
+    """캐시된 토큰 반환, 만료 시 재발급."""
+    if not force:
+        with _token_lock:
+            if _token_cache["token"] and time.time() < _token_cache["exp"]:
+                return True, _token_cache["token"]
+    return _fetch_token()
+
 
 _SR_WORK_TYPE_PROMPT = {
     "계정/권한 처리":    "sr_account",
@@ -20,60 +110,62 @@ _SR_WORK_TYPE_PROMPT = {
 }
 
 
-def _get_devx_api_key(api_key: str = None) -> str:
-    if api_key:
-        return api_key
-    v = os.environ.get("DEVX_API_KEY", "")
-    if v:
-        return v
-    cfg = api_read(mask_sensitive=False)
-    if cfg.get("ok"):
-        return cfg.get("env", {}).get("DEVX_API_KEY", "").strip()
-    return ""
-
-
-def _call_devx(agent_env_key: str, prompt: str, api_key: str = None) -> tuple[bool, str]:
-    """DevX AI 단일 호출 공통 헬퍼. (ok, text_or_error) 반환."""
-    resolved_key = _get_devx_api_key(api_key)
-    if not resolved_key:
-        return False, "DEVX_API_KEY가 설정되지 않았습니다."
-
-    agent_code = os.environ.get(agent_env_key, "").strip() or "playground"
-
+def _post_chat(token: str, agent_code: str, prompt: str) -> tuple[bool, str, int]:
+    """/agent/chat 호출. (ok, text_or_error, http_code) 반환. http_code=0 은 네트워크 오류."""
     payload = json.dumps({
-        "agent_code": agent_code,
         "query": prompt,
+        "user": _get_user(),
+        "agent_code": agent_code,
         "response_mode": "blocking",
-    }).encode("utf-8")
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
+    }, ensure_ascii=False).encode("utf-8")
     try:
         req = urllib.request.Request(
-            DEVX_API_URL, data=payload,
+            DEVX_CHAT_URL, data=payload,
             headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {resolved_key}",
+                "Content-Type": "application/json; charset=utf-8",
+                "Authorization": f"Bearer {token}",
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, context=ctx, timeout=60) as resp:
+        with urllib.request.urlopen(req, context=_ssl_ctx(), timeout=90) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        ext = data.get("external_response", {})
-        # 실제 응답 구조: external_response.dify_response.answer (또는 external_response.answer)
-        text = (ext.get("dify_response", {}).get("answer") or ext.get("answer") or "").strip()
-        return True, text
+        ext = data.get("external_response", {}) or {}
+        # 응답 구조: 최상위 answer, 폴백 external_response.answer / .dify_response.answer
+        text = (data.get("answer")
+                or ext.get("answer")
+                or ext.get("dify_response", {}).get("answer")
+                or "").strip()
+        return True, text, 200
     except urllib.error.HTTPError as e:
         try:
             err = json.loads(e.read().decode("utf-8", errors="replace"))
-            msg = err.get("message", f"HTTP {e.code}")
+            msg = err.get("detail") or err.get("message") or f"HTTP {e.code}"
         except Exception:
             msg = f"HTTP {e.code}"
-        return False, msg
+        return False, msg, e.code
     except Exception as e:
-        return False, str(e)
+        return False, str(e), 0
+
+
+def _call_devx(agent_env_key: str, prompt: str, api_key: str = None) -> tuple[bool, str]:
+    """DevX AI 단일 호출 공통 헬퍼. (ok, text_or_error) 반환.
+
+    api_key 인자는 구 정적 키 호환용 — 현재는 무시하고 Gateway 토큰을 사용한다.
+    agent_env_key 가 빈 문자열이거나 미설정이면 'playground' 사용.
+    """
+    agent_code = (os.environ.get(agent_env_key, "").strip() if agent_env_key else "") or "playground"
+
+    ok, token = _get_token()
+    if not ok:
+        return False, token
+
+    ok, text, code = _post_chat(token, agent_code, prompt)
+    # 401 = 토큰 만료/무효 → 강제 재발급 후 1회 재시도
+    if not ok and code == 401:
+        ok2, token2 = _get_token(force=True)
+        if ok2:
+            ok, text, code = _post_chat(token2, agent_code, prompt)
+    return ok, text
 
 
 def api_devx_requirements(
@@ -243,9 +335,6 @@ def api_devx_safe_query(
 
 def api_devx_chat(history: list, message: str, api_key: str = None, **kwargs) -> dict:
     """DevX AI 안내데스크 채팅"""
-    resolved_key = _get_devx_api_key(api_key)
-    if not resolved_key:
-        return {"ok": False, "error": "DEVX_API_KEY가 설정되지 않았습니다."}
     if not message.strip():
         return {"ok": False, "error": "메시지가 비어있습니다."}
 
@@ -261,7 +350,7 @@ def api_devx_chat(history: list, message: str, api_key: str = None, **kwargs) ->
         query = message
 
     t0 = time.time()
-    ok, reply = _call_devx("DEVX_AGENT_CHAT", query, resolved_key)
+    ok, reply = _call_devx("DEVX_AGENT_CHAT", query)
     latency = int((time.time() - t0) * 1000)
 
     if not ok:
@@ -287,17 +376,18 @@ def api_devx_weekly(full_prompt: str, data_query: str, api_key: str = None) -> d
 
 
 def api_devx_check(api_key: str = None) -> dict:
-    """DevX AI API 상태 확인 (ping)"""
-    resolved_key = _get_devx_api_key(api_key)
-    if not resolved_key:
-        return {"ok": False, "status": "no_key", "message": "DEVX_API_KEY가 설정되지 않았습니다."}
+    """DevX AI Gateway 상태 확인 — 토큰 발급으로 자격증명·IP·연결 검증."""
+    cid, csec = _get_credentials()
+    if not cid or not csec:
+        return {"ok": False, "status": "no_key",
+                "message": "DEVX_CLIENT_ID/DEVX_CLIENT_SECRET가 설정되지 않았습니다."}
 
     t0 = time.time()
-    ok, reply = _call_devx("", "ping", resolved_key)
+    ok, msg = _get_token(force=True)
     latency = int((time.time() - t0) * 1000)
 
     if ok:
         return {"ok": True, "status": "ok", "latency_ms": latency}
-    if "API_KEY" in reply or "401" in reply or "403" in reply:
-        return {"ok": False, "status": "invalid_key", "latency_ms": latency, "message": reply[:200]}
-    return {"ok": False, "status": "error", "latency_ms": latency, "message": reply[:200]}
+    if "401" in msg or "403" in msg or "invalid" in msg.lower():
+        return {"ok": False, "status": "invalid_key", "latency_ms": latency, "message": msg[:200]}
+    return {"ok": False, "status": "error", "latency_ms": latency, "message": msg[:200]}

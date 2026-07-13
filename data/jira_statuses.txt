@@ -1,0 +1,238 @@
+[분류 없음]
+  열림
+[완료]
+  Approved
+  Canceled
+  Cancelled
+  Completed
+  DONE
+  Declined
+  Deploy
+  Failure Resolved
+  GDC이관
+  JVM 등록
+  Rejected
+  Released
+  개선 검토
+  개선 대기
+  계약완료
+  닫힘
+  마감
+  반려
+  배포 후 TEST 완료
+  변경이관
+  보관
+  보류
+  비대상
+  완료
+  완료됨
+  요청결재반려
+  이관
+  작업이관
+  제외
+  종료
+  중단
+  취소
+  테스트완료
+  팀이관
+  편성등록/확정
+  프로젝트이관
+  해결됨
+  협의필요
+  횡전개 완료
+[진행 중]
+  (Dev) QA 완료
+  (Dev) 개발 완료
+  (Dev) 진행 중
+  (Prd) 배포
+  (Prd) 배포 완료
+  1.5차 검토
+  1.5차 검토 완료
+  1차 검토
+  1차 완료
+  1차 이행점검
+  2차 검토
+  2차 이행점검
+  Analyze
+  Analyzing
+  Awaiting CAB approval
+  Awaiting implementation
+  CMDB 변경완료 결재 대기
+  CMDB 업데이트
+  CMDB 점검 완료
+  CMDB 점검완료 결재 대기
+  Confirmed
+  DI팀 처리 중
+  FPT Review
+  Failure In Progress
+  GDC Team Review
+  GDC 과업 변경/추가 요청 결재 대기
+  GDC 과업 변경/추가 요청 결재중
+  GDC 단순처리
+  GDC 이관
+  GDC 이관 요청 결재 대기
+  GDC 이관 요청 결재중
+  GDC 처리 완료
+  Hardware Failure
+  I&C CONFIRM
+  I&C Review
+  I&C 단순처리 확인
+  I&C 처리완료
+  I&C 처리중
+  I&C 확인
+  Implementing
+  In Checking
+  Investigation
+  JIRA 처리중
+  Occurred
+  PRD 배포
+  Planning
+  PwC/I&C 처리중
+  QA
+  QA TEST
+  QNA
+  Reviewing
+  Spec Create
+  Testing
+  Translate
+  Update
+  VOD 입수
+  VOD 제작
+  VOD 제작승인 및 일정관리
+  Waiting for change
+  Work in progress
+  개발 중
+  개발완료
+  개선
+  개선안 보고
+  검토
+  검토 중
+  검토결재중
+  결과보고
+  결재 대기
+  결재반려
+  결재선 입력 완료
+  결재완료
+  계획보고
+  계획수립
+  구매요청완료
+  긴급 배포
+  긴급배포 확인 대기
+  내용 확인
+  리뷰
+  만족도 조사
+  매뉴얼 머지
+  문제분석
+  배포
+  배포 계획 완료
+  배포 승인 대기
+  배포 예정 QA
+  배포 확인 대기
+  배포관리번호 입력
+  배포승인 결재 완료
+  변경 결재 대기
+  변경계획 결재 대기
+  변경적용 결과등록
+  변경적용 결과등록 대기
+  변경처리중
+  보고
+  보고 중
+  보류 중
+  사전심의 등록완료
+  산출물 등록
+  설계완료
+  설계중
+  수주품의완료
+  승인 대기
+  시행 및 공지
+  신고하기 접수
+  실행
+  아키텍트팀 이관
+  아키텍트팀 이관 대기
+  영향도 분석
+  영향도검토
+  영향도분석
+  완료 보고 결재 대기
+  완료보고
+  요청자 확인
+  운영팀 확인요청
+  원가확정 및 계약
+  원가확정완료
+  유지보수 검토
+  유지보수 계약 준비중
+  유지보수 서비스 중
+  이슈공유
+  작업계획
+  작업계획 결재 대기
+  작업수행
+  작업완료 결재 대기
+  작업중
+  장애 접수
+  장애보고 결재중
+  장애판정 진행 중
+  접수
+  지연
+  진행 중
+  진행 중
+  진행중
+  처리 중
+  처리결과 확인
+  체크리스트 수행중
+  최종보고 결재 대기
+  코드 리뷰
+  테스트
+  편성계획
+  합의완료일 변경 결재 대기
+  해결방안검토 결재중
+  해결안 도출
+  해결안 적용
+  현업 확인
+  현업 확인 완료
+  현업확인 결재 대기
+  현황조사 및 개선안 도출
+  협의 중
+  횡전개 검토
+  횡전개 결재중
+  횡전개 계획 수립
+  횡전개 수행
+  후보사 평가 및 선정
+  후보사선정
+[할 일]
+  BLOSSOM 결재중
+  Backlog
+  Blossom 결재 중
+  CMDB 변경완료 결재 중
+  CMDB 점검완료 결재 중
+  HOLD
+  Peer review / change manager approval
+  Pending
+  Selected
+  Selected for Development
+  VOD 제작요청
+  Waiting
+  결재중(Blossom)
+  다시 열림
+  대기 중
+  등록
+  등록 승인
+  문제분석 및 해결방안 도출
+  문제접수 및 분류
+  미해결
+  배포승인 결재 중
+  시작
+  신고하기 결재 대기
+  신고하기 결재 중
+  신고하기 접수 대기
+  실행결과 확인 중
+  아키텍트팀 이관 결재중
+  작업계획 결재 중
+  작업대기
+  작업완료 결재 중
+  장애 등록
+  접수 대기
+  준비
+  할 일
+  할 일
+  해결안 적절성 확인 중
+  해야 할 일
+  횡전개 요청

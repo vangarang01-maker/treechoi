@@ -1,0 +1,305 @@
+경추염좌로 인한 의료비 요청드립니다<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>스벅 Jira 도우미 — 사용 가이드</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 960px; margin: 0 auto; padding: 24px; color: #172B4D; line-height: 1.6; }
+  h1 { font-size: 2em; border-bottom: 3px solid #0052CC; padding-bottom: 8px; }
+  h2 { font-size: 1.5em; color: #0052CC; margin-top: 40px; border-bottom: 1px solid #DFE1E6; padding-bottom: 4px; }
+  h3 { font-size: 1.1em; color: #253858; margin-top: 24px; }
+  .info-box { background: #DEEBFF; border-left: 4px solid #0052CC; padding: 12px 16px; border-radius: 4px; margin: 16px 0; }
+  .tip-box  { background: #E3FCEF; border-left: 4px solid #00875A; padding: 12px 16px; border-radius: 4px; margin: 16px 0; }
+  .warn-box { background: #FFFAE6; border-left: 4px solid #FF8B00; padding: 12px 16px; border-radius: 4px; margin: 16px 0; }
+  .screenshot { border: 1px solid #DFE1E6; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.1); max-width: 100%; display: block; margin: 16px auto; }
+  .step { display: flex; align-items: flex-start; gap: 12px; margin: 12px 0; }
+  .step-num { background: #0052CC; color: #fff; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th { background: #F4F5F7; font-weight: 600; }
+  th, td { border: 1px solid #DFE1E6; padding: 8px 12px; text-align: left; }
+  code { background: #F4F5F7; padding: 2px 6px; border-radius: 3px; font-family: 'SFMono-Regular', Consolas, monospace; font-size: .9em; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: .8em; font-weight: 600; }
+  .badge-blue { background: #DEEBFF; color: #0052CC; }
+  .badge-green { background: #E3FCEF; color: #006644; }
+  .badge-yellow { background: #FFFAE6; color: #974F0C; }
+  .nav-list { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; }
+  .nav-list li a { display: block; padding: 6px 14px; background: #F4F5F7; border-radius: 4px; text-decoration: none; color: #0052CC; font-size: .9em; }
+  .nav-list li a:hover { background: #DEEBFF; }
+</style>
+</head>
+<body>
+
+<h1>🚀 스벅 Jira 도우미 — 사용 가이드</h1>
+
+<p>이 문서는 <strong>스벅 Jira 도우미</strong> 웹 앱의 주요 기능과 사용 방법을 소개합니다.<br>
+AI(Gemini) 기반의 JQL 자연어 검색, 유사 이슈 탐색, 처리 마법사 등 업무 효율을 높이는 핵심 기능을 단계별로 안내합니다.</p>
+
+<div class="info-box">
+  📌 <strong>접속 URL</strong>: 사내 Docker 서버에서 실행 중인 앱에 접속합니다. (예: <code>http://&lt;서버IP&gt;:8765</code>)<br>
+  설정 화면에서 Gemini API Key와 Jira PAT Token을 먼저 등록해야 모든 기능을 사용할 수 있습니다.
+</div>
+
+<!-- 목차 -->
+<h2>목차</h2>
+<ul class="nav-list">
+  <li><a href="#overview">1. 앱 개요</a></li>
+  <li><a href="#settings">2. 초기 환경 설정</a></li>
+  <li><a href="#chat">3. AI 채팅 (Jira 검색)</a></li>
+  <li><a href="#similar">4. 유사 이슈 검색</a></li>
+  <li><a href="#wizard">5. 처리 마법사</a></li>
+  <li><a href="#tips">6. 유용한 팁</a></li>
+  <li><a href="#faq">7. FAQ</a></li>
+</ul>
+
+<!-- 1. 앱 개요 -->
+<h2 id="overview">1. 앱 개요</h2>
+
+<p>스벅 Jira 도우미는 Jira 업무 처리를 AI로 가속화하는 사내 도구입니다.</p>
+
+<table>
+  <tr>
+    <th>기능</th><th>설명</th><th>사이드바 탭</th>
+  </tr>
+  <tr>
+    <td>🤖 AI 채팅</td>
+    <td>자연어로 Jira 이슈를 검색 · 요약 · 분석</td>
+    <td>안내데스크</td>
+  </tr>
+  <tr>
+    <td>⚙️ 환경 설정</td>
+    <td>API Key · PAT Token · 대상 사용자 등록</td>
+    <td>환경설정</td>
+  </tr>
+  <tr>
+    <td>🔍 Jira 검색</td>
+    <td>JQL 직접 실행 및 결과 확인</td>
+    <td>Jira 테스트</td>
+  </tr>
+  <tr>
+    <td>🔗 유사 이슈</td>
+    <td>임베딩 기반 유사 이슈 자동 탐색</td>
+    <td>유사이슈검색</td>
+  </tr>
+  <tr>
+    <td>🪄 처리 마법사</td>
+    <td>이슈 유형별 처리 초안 AI 자동 생성</td>
+    <td>처리마법사</td>
+  </tr>
+</table>
+
+<img src="screenshots/01_안내데스크.png" alt="스벅 Jira 도우미 — 홈 화면" class="screenshot">
+<p style="text-align:center;color:#6B778C;font-size:.85em">▲ 앱 홈 화면 (안내데스크 탭)</p>
+
+<!-- 2. 환경 설정 -->
+<h2 id="settings">2. 초기 환경 설정</h2>
+
+<div class="warn-box">
+  ⚠️ <strong>필수 작업</strong>: 아래 두 가지 Key를 등록하지 않으면 AI 기능이 동작하지 않습니다.
+</div>
+
+<h3>2-1. Gemini API Key 등록</h3>
+<div class="step">
+  <span class="step-num">1</span>
+  <span>사이드바에서 <strong>환경설정</strong> 탭 클릭</span>
+</div>
+<div class="step">
+  <span class="step-num">2</span>
+  <span>Gemini API Key 발급 링크를 클릭하거나, 기발급된 Key를 입력</span>
+</div>
+<div class="step">
+  <span class="step-num">3</span>
+  <span><strong>저장</strong> 버튼 클릭 → 화면 상단에 저장 완료 메시지 확인</span>
+</div>
+
+<h3>2-2. Jira PAT Token 등록</h3>
+<div class="step">
+  <span class="step-num">1</span>
+  <span>Jira → 프로필 아이콘 → <code>Profile</code> → <code>Personal Access Tokens</code>에서 Token 생성</span>
+</div>
+<div class="step">
+  <span class="step-num">2</span>
+  <span>환경설정 화면에 Token 및 Jira Base URL 입력 후 저장</span>
+</div>
+<div class="step">
+  <span class="step-num">3</span>
+  <span><strong>⚡ 연결 확인</strong> 버튼으로 연결 상태 검증</span>
+</div>
+
+<h3>2-3. 대상 사용자 설정</h3>
+<p>유사 이슈 검색의 기준이 될 사용자(최대 3명)를 사번으로 등록합니다.</p>
+
+<img src="screenshots/02_환경설정.png" alt="환경설정 화면" class="screenshot">
+<p style="text-align:center;color:#6B778C;font-size:.85em">▲ 환경설정 화면</p>
+
+<!-- 3. AI 채팅 -->
+<h2 id="chat">3. AI 채팅 (Jira 검색)</h2>
+
+<p>자연어로 질문하면 Gemini AI가 JQL로 변환해 Jira를 검색하고 결과를 요약합니다.</p>
+
+<h3>사용 예시</h3>
+<div class="tip-box">
+  💬 "최근 내가 담당한 오류 이슈 찾아줘"<br>
+  💬 "이번 주 완료된 변경관리 이슈 목록 보여줘"<br>
+  💬 "JIRA-1234 이슈 상태 확인해줘"
+</div>
+
+<div class="step">
+  <span class="step-num">1</span>
+  <span>사이드바에서 <strong>Jira 테스트</strong> 탭 클릭</span>
+</div>
+<div class="step">
+  <span class="step-num">2</span>
+  <span>하단 입력창에 질문 입력 후 <kbd>Enter</kbd> 또는 전송 버튼 클릭</span>
+</div>
+<div class="step">
+  <span class="step-num">3</span>
+  <span>AI가 JQL을 생성해 검색 후 결과를 카드 형태로 표시</span>
+</div>
+<div class="step">
+  <span class="step-num">4</span>
+  <span>이슈 키 클릭 → Jira 원본 페이지로 바로 이동</span>
+</div>
+
+<div class="info-box">
+  📝 채팅 내용은 브라우저를 닫아도 <strong>localStorage에 보존</strong>됩니다.<br>
+  새로고침 후에도 이전 대화가 유지됩니다.
+</div>
+
+<!-- 4. 유사 이슈 검색 -->
+<h2 id="similar">4. 유사 이슈 검색</h2>
+
+<p>현재 담당 이슈와 <strong>임베딩(Embedding) 유사도</strong>가 높은 과거 이슈를 자동으로 찾아줍니다.<br>
+유사 이슈의 처리 내용을 참고해 현재 이슈를 더 빠르게 해결하세요.</p>
+
+<h3>캐시 구축 (최초 1회)</h3>
+<div class="step">
+  <span class="step-num">1</span>
+  <span><strong>유사이슈검색</strong> 탭 클릭</span>
+</div>
+<div class="step">
+  <span class="step-num">2</span>
+  <span><strong>🔄 서비스요청관리</strong> 또는 <strong>🔄 변경관리</strong> 버튼으로 이슈 유형별 캐시 구축</span>
+</div>
+<div class="step">
+  <span class="step-num">3</span>
+  <span>진행 상황은 실시간 프로그레스 바로 확인 가능 (수백 건은 수 분 소요)</span>
+</div>
+
+<div class="warn-box">
+  ⏱️ 첫 캐시 구축은 이슈 수에 따라 수 분이 걸릴 수 있습니다.<br>
+  이미 구축된 캐시는 <code>./data/embedding_cache.db</code>에 저장되어 재시작 후에도 유지됩니다.
+</div>
+
+<h3>유사 이슈 검색</h3>
+<div class="step">
+  <span class="step-num">1</span>
+  <span>미해결 이슈 목록에서 이슈 키를 클릭하거나 검색창에 이슈 키 입력</span>
+</div>
+<div class="step">
+  <span class="step-num">2</span>
+  <span>유사도 높은 이슈가 <strong>이슈 유형별 섹션</strong>으로 정렬되어 표시</span>
+</div>
+<div class="step">
+  <span class="step-num">3</span>
+  <span>각 유사 이슈 카드에서 <strong>💬 댓글</strong> / <strong>🔄 상태</strong> 등 인라인 액션 바로 실행 가능</span>
+</div>
+
+<img src="screenshots/04_유사이슈검색.png" alt="유사 이슈 검색 화면" class="screenshot">
+<p style="text-align:center;color:#6B778C;font-size:.85em">▲ 유사 이슈 검색 결과 화면 (이슈 유형별 아코디언)</p>
+
+<!-- 5. 처리 마법사 -->
+<h2 id="wizard">5. 처리 마법사</h2>
+
+<p>이슈 키를 입력하면 AI가 <strong>처리 내용 초안</strong>을 자동으로 작성합니다.<br>
+변경관리·서비스요청관리 이슈 모두 지원하며, 업무 유형에 맞는 항목이 자동 추출됩니다.</p>
+
+<h3>지원 이슈 유형</h3>
+<table>
+  <tr>
+    <th>이슈 유형</th><th>지원 항목</th>
+  </tr>
+  <tr>
+    <td>변경관리</td>
+    <td>배포절차 / 결제멘트 / 영향도 분석 / 롤백 계획 등 6종 양식</td>
+  </tr>
+  <tr>
+    <td>서비스요청관리</td>
+    <td>계정·권한 처리 / 데이터 추출 / 공통코드 변경 / 기타 — 4종</td>
+  </tr>
+</table>
+
+<h3>사용 방법</h3>
+<div class="step">
+  <span class="step-num">1</span>
+  <span>사이드바에서 <strong>처리마법사</strong> 탭 클릭</span>
+</div>
+<div class="step">
+  <span class="step-num">2</span>
+  <span>이슈 키 입력 후 <strong>이슈 감지</strong> 버튼 클릭</span>
+</div>
+<div class="step">
+  <span class="step-num">3</span>
+  <span>이슈 정보 확인 → 업무 유형 선택(서비스요청관리의 경우) → <strong>초안 생성</strong> 버튼 클릭</span>
+</div>
+<div class="step">
+  <span class="step-num">4</span>
+  <span>생성된 초안을 검토 후 Jira에 댓글로 복사하여 사용</span>
+</div>
+
+<div class="tip-box">
+  💡 <strong>유사 이슈와 연동</strong>: 유사이슈검색 화면에서 <strong>🪄 마법사로 열기</strong> 버튼을 클릭하면<br>
+  해당 이슈 키가 자동 입력된 채로 마법사 탭이 열립니다. (예정 기능)
+</div>
+
+<!-- 6. 유용한 팁 -->
+<h2 id="tips">6. 유용한 팁</h2>
+
+<h3>🌙 다크/라이트 모드</h3>
+<p>사이드바 하단의 테마 토글 버튼으로 전환합니다. 설정은 localStorage에 저장되어 재접속 후에도 유지됩니다.</p>
+
+<h3>📌 설정 영속성</h3>
+<p>API Key, PAT Token, 대화 내용 모두 브라우저 localStorage에 저장됩니다.<br>
+같은 브라우저에서는 재접속 후에도 설정이 유지됩니다.</p>
+
+<h3>🔗 이슈 키 링크</h3>
+<p>검색 결과의 모든 이슈 키를 클릭하면 Jira 원본 페이지로 바로 이동합니다.</p>
+
+<h3>⚡ 연결 확인</h3>
+<p>환경설정에서 <strong>⚡ 연결 확인</strong> 버튼으로 Jira 연결 상태를 언제든 검증할 수 있습니다.</p>
+
+<!-- 7. FAQ -->
+<h2 id="faq">7. FAQ</h2>
+
+<table>
+  <tr>
+    <th>질문</th><th>답변</th>
+  </tr>
+  <tr>
+    <td>AI 응답이 없거나 오류가 발생해요</td>
+    <td>환경설정에서 Gemini API Key가 올바르게 등록되어 있는지 확인하세요. API 사용 한도 초과 시 403 오류가 발생할 수 있습니다.</td>
+  </tr>
+  <tr>
+    <td>Jira 연결이 안 돼요</td>
+    <td>PAT Token 만료 여부를 확인하세요. 토큰을 재발급 후 환경설정에서 업데이트 하세요.</td>
+  </tr>
+  <tr>
+    <td>캐시 구축이 너무 오래 걸려요</td>
+    <td>이슈 수가 많을수록 시간이 소요됩니다. 한 번 구축된 캐시는 서버 재시작 후에도 유지되므로 첫 구축 이후에는 빠릅니다.</td>
+  </tr>
+  <tr>
+    <td>설정이 저장되지 않아요</td>
+    <td>브라우저의 localStorage가 비활성화되어 있거나 시크릿 모드를 사용 중인지 확인하세요.</td>
+  </tr>
+  <tr>
+    <td>대화 내용을 초기화하고 싶어요</td>
+    <td>채팅 화면의 <strong>대화 초기화</strong> 버튼을 클릭하거나, 브라우저 개발자 도구에서 localStorage를 지우세요.</td>
+  </tr>
+</table>
+
+<hr style="margin-top:48px;border-color:#DFE1E6">
+<p style="color:#6B778C;font-size:.85em">
+  📅 최종 업데이트: 2026-03-21 &nbsp;|&nbsp; 스벅 Jira 도우미 v1.x
+</p>
+
+</body>
+</html>
